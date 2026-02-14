@@ -54,7 +54,3 @@ Contributions are welcome. See [CONTRIBUTING.md](.github/CONTRIBUTING.md) and th
 ## License
 
 See [LICENSE](LICENSE) for details.
-
----
-
-**Note for maintainers:** Before publishing, replace `YOUR_ORG` in `.github/CONTRIBUTING.md`, `.github/SECURITY.md`, and `.github/CODE_OF_CONDUCT.md` with your GitHub organization or username.
