@@ -63,22 +63,22 @@ This script automatically:
 - Copies all output files to `distribution/`
 
 **STM32CubeIDE:**
-Open the project and build in the IDE. Output: `./Release/MonstaTek_M1_v0801-ChrisUFO.elf`
+Open the project and build in the IDE. Output: `./Release/MonstaTek_M1_v0802-ChrisUFO.elf`
 
 **Manual CMake build:**
 ```bash
 cmake --preset gcc-14_2_build-release
 cmake --build out/build/gcc-14_2_build-release
-python tools/append_crc32.py out/build/gcc-14_2_build-release/MonstaTek_M1_v0801-ChrisUFO.bin
+python tools/append_crc32.py out/build/gcc-14_2_build-release/MonstaTek_M1_v0802-ChrisUFO.bin
 ```
 
 **Output files** (in `distribution/` or `out/build/gcc-14_2_build-release/`):
 
 | File | Use |
 |------|-----|
-| `MonstaTek_M1_v0801-ChrisUFO.bin` | STM32 firmware (includes CRC32) |
-| `MonstaTek_M1_v0801-ChrisUFO.hex` | STM32CubeProgrammer / JLink |
-| `MonstaTek_M1_v0801-ChrisUFO.elf` | Debug sessions |
+| `MonstaTek_M1_v0802-ChrisUFO.bin` | STM32 firmware (includes CRC32) |
+| `MonstaTek_M1_v0802-ChrisUFO.hex` | STM32CubeProgrammer / JLink |
+| `MonstaTek_M1_v0802-ChrisUFO.elf` | Debug sessions |
 
 ## Installing Firmware via SD Card
 
@@ -88,15 +88,35 @@ The M1 has two separate firmware components that can be updated:
 
 This is the primary firmware that runs the M1 device.
 
-**File:** `MonstaTek_M1_v0801-ChrisUFO.bin` (includes embedded CRC32 checksum)
+**File:** `MonstaTek_M1_v0802-ChrisUFO.bin` (includes embedded CRC32 checksum)
 
 1. Copy the `.bin` file to your SD card (any folder)
 2. Insert the SD card into the M1
 3. Navigate to **Settings → Firmware Update → Image file**
-4. Browse to and select `MonstaTek_M1_v0801-ChrisUFO.bin`
+4. Browse to and select `MonstaTek_M1_v0802-ChrisUFO.bin`
 5. Confirm — the device validates the embedded CRC32, flashes the firmware, and reboots automatically
 
 **Note:** The build system automatically appends a 4-byte CRC32 checksum to the end of the `.bin` file for validation during the update process.
+
+### STM32 ROM USB DFU Mode
+
+You can also flash STM32 firmware over USB using the built-in STM32 ROM DFU bootloader.
+
+On device:
+- Open **Settings -> Firmware update -> USB DFU mode**
+- Confirm entry (RIGHT/OK)
+
+CLI shortcut:
+```bash
+dfu
+```
+
+On host (example with dfu-util):
+```bash
+dfu-util -a 0 -D MonstaTek_M1_v0802-ChrisUFO.bin
+```
+
+If `dfu-util` does not detect the device, use STM32CubeProgrammer in USB mode and verify USB cable/data support.
 
 ### ESP32 Firmware (WiFi/Bluetooth Module)
 
@@ -283,7 +303,7 @@ status, and — for stubs — the estimated effort and pen-testing value of comp
 | Menu Item | Status | Notes |
 |-----------|--------|-------|
 | About | ✅ | Shows firmware version and device info |
-| Firmware Update | ✅ | Browse SD card for `.bin`, flash via bootloader |
+| Firmware Update | ✅ | Browse SD card for `.bin`, flash via bank-swap updater, or enter ROM USB DFU mode |
 | LCD & Notifications | 🚫 | `settings_lcd_and_notifications()` exists but `menu_Settings_LCD_and_Notifications` is **commented out** of the Settings menu array in `m1_menu.c`; function body only shows "LCD..." placeholder text |
 | System | 🚫 | `settings_system()` exists but `menu_Settings_System` is **commented out** of the Settings menu array in `m1_menu.c`; function body only shows "SYSTEM..." placeholder text |
 

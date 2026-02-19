@@ -42,6 +42,7 @@
 #include "m1_fusb302.h"
 #include "m1_nfc.h"
 #include "battery.h"
+#include "m1_fw_update.h"
 
 /*************************** D E F I N E S ************************************/
 
@@ -82,6 +83,8 @@ void cmd_m1_mtest_subghz(char *pconsole, char *input_params[], uint8_t n_params,
 void cmd_m1_mtest_esp32(char *pconsole, char *input_params[], uint8_t n_params, uint8_t cmd_type);
 void cmd_m1_mtest_gpio(char *pconsole, char *input_params[], uint8_t n_params, uint8_t cmd_type);
 void cmd_m1_mtest_nfc(char *pconsole, char *input_params[], uint8_t n_params, uint8_t cmd_type);
+BaseType_t cmd_dfu(char *pcWriteBuffer, size_t xWriteBufferLen, const char *pcCommandString, uint8_t num_of_params);
+BaseType_t cmd_dfu_help(void);
 
 /*************** F U N C T I O N   I M P L E M E N T A T I O N ****************/
 
@@ -225,6 +228,35 @@ BaseType_t cmd_m1_mtest(char *pconsole, size_t xWriteBufferLen, const char *pcCo
     return pdFALSE;
 
 } // BaseType_t cmd_m1_mtest(char *pconsole, size_t xWriteBufferLen, const char *pcCommandString, uint8_t num_of_params)
+
+
+/*============================================================================*/
+/*
+ * Enter USB DFU mode from CLI.
+ */
+/*============================================================================*/
+BaseType_t cmd_dfu(char *pcWriteBuffer, size_t xWriteBufferLen, const char *pcCommandString, uint8_t num_of_params)
+{
+	(void)xWriteBufferLen;
+	(void)pcCommandString;
+	(void)num_of_params;
+
+	strcpy(pcWriteBuffer, "Rebooting to USB DFU mode...\r\n");
+	firmware_update_usb_dfu_mode();
+	return pdFALSE;
+} // BaseType_t cmd_dfu(char *pcWriteBuffer, size_t xWriteBufferLen, const char *pcCommandString, uint8_t num_of_params)
+
+
+/*============================================================================*/
+/*
+ * Help for USB DFU CLI command.
+ */
+/*============================================================================*/
+BaseType_t cmd_dfu_help(void)
+{
+	M1_LOG_N(M1_LOGDB_TAG, "dfu: reboot device to STM32 ROM USB DFU mode\r\n");
+	return pdFALSE;
+} // BaseType_t cmd_dfu_help(void)
 
 
 /*============================================================================*/

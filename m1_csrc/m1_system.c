@@ -20,6 +20,7 @@
 #include "app_freertos.h"
 #include "m1_tasks.h"
 #include "m1_power_ctl.h"
+#include "m1_fw_update.h"
 #include "m1_fw_update_bl.h"
 #include "m1_lp5814.h"
 #include "battery.h"
@@ -688,6 +689,14 @@ void startup_config_handler(void)
 			} // if ( !m1_device_stat.dev_reset_by_wdt )
 			m1_led_fw_update_off();
 		} // else if ( m1_device_stat.bu_regs.device_op_status==DEV_OP_STATUS_REBOOT )
+		else if ( m1_device_stat.bu_regs.device_op_status==DEV_OP_STATUS_USB_DFU_REQUEST )
+		{
+			startup_config_write(BK_REGS_SELECT_DEV_OP_STAT, DEV_OP_STATUS_NO_OP);
+			startup_info_screen_display("USB DFU MODE...");
+			firmware_update_enter_usb_dfu();
+			startup_info_screen_display("DFU MODE FAILED!");
+			M1_LOG_I(M1_LOGDB_TAG, "Failed to enter USB DFU mode!\r\n");
+		}
 	} // else
 
 	if ( m1_device_stat.op_mode != M1_OPERATION_MODE_DISPLAY_ON )

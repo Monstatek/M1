@@ -13,6 +13,8 @@
 #define M1_CLI_H_
 
 BaseType_t cmd_m1_mtest(char *pcWriteBuffer, size_t xWriteBufferLen, const char *pcCommandString, uint8_t num_of_params);
+BaseType_t cmd_dfu(char *pcWriteBuffer, size_t xWriteBufferLen, const char *pcCommandString, uint8_t num_of_params);
+BaseType_t cmd_dfu_help(void);
 
 extern BaseType_t cmd_m1_mtest_help(void);
 extern void cmd_m1_mtest_help_basic_system(void);

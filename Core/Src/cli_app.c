@@ -72,6 +72,13 @@ const CLI_Command_Definition_t xCommandList[] = {
         .cExpectedNumberOfParameters = -1 /* variable parameters are expected. */
     },
     {
+        .pcCommand = "dfu", /* The command string to type. */
+        .pcHelpString = "dfu:\r\n Reboot to USB DFU mode\r\n\r\n",
+        .pxCommandInterpreter = cmd_dfu, /* The function to run. */
+		.pxCommandHelper = cmd_dfu_help, /* Help for the function. */
+        .cExpectedNumberOfParameters = 0 /* No parameters are expected. */
+    },
+    {
         .pcCommand = NULL /* simply used as delimeter for end of array*/
     }
 };
