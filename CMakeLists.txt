@@ -21,7 +21,7 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 # Set the project name
-set(CMAKE_PROJECT_NAME MonstaTek_M1_v0801-ChrisUFO)
+set(CMAKE_PROJECT_NAME MonstaTek_M1_v0802-ChrisUFO)
 
 # Include toolchain file
 include("cmake/gcc-arm-none-eabi.cmake")
@@ -78,33 +78,43 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
 set(TARGET_ELF "${CMAKE_BINARY_DIR}/${CMAKE_PROJECT_NAME}.elf")
 # Note: Optional post-build steps (size, objdump, md5) are handled by the build script
 
-# Command to generate .bin file
-add_custom_command(
-    COMMAND ${CMAKE_COMMAND} -E echo "Generating bin file ${CMAKE_PROJECT_NAME}.bin"
-    TARGET ${CMAKE_PROJECT_NAME}
-    POST_BUILD
-    COMMAND ${CMAKE_OBJCOPY}
--O binary ${TARGET_ELF} ${CMAKE_BINARY_DIR}/${CMAKE_PROJECT_NAME}.bin
-    #COMMENT "Generating .bin file"
-)
+set(OBJCOPY_TOOL "${CMAKE_OBJCOPY}")
+if(NOT IS_ABSOLUTE "${OBJCOPY_TOOL}")
+    unset(OBJCOPY_TOOL)
+    find_program(OBJCOPY_TOOL NAMES ${CMAKE_OBJCOPY} arm-none-eabi-objcopy)
+endif()
 
-# Command to append CRC32 to .bin file (required for STM32 firmware update)
-add_custom_command(
-    COMMAND ${CMAKE_COMMAND} -E echo "Appending CRC32 to ${CMAKE_PROJECT_NAME}.bin"
-    TARGET ${CMAKE_PROJECT_NAME}
-    POST_BUILD
-    COMMAND python ${CMAKE_SOURCE_DIR}/tools/append_crc32.py ${CMAKE_BINARY_DIR}/${CMAKE_PROJECT_NAME}.bin
-)
+if(OBJCOPY_TOOL)
+    # Command to generate .bin file
+    add_custom_command(
+        COMMAND ${CMAKE_COMMAND} -E echo "Generating bin file ${CMAKE_PROJECT_NAME}.bin"
+        TARGET ${CMAKE_PROJECT_NAME}
+        POST_BUILD
+        COMMAND ${OBJCOPY_TOOL}
+    -O binary ${TARGET_ELF} ${CMAKE_BINARY_DIR}/${CMAKE_PROJECT_NAME}.bin
+        #COMMENT "Generating .bin file"
+    )
 
-# Command to generate .hex file
-add_custom_command(
-    COMMAND ${CMAKE_COMMAND} -E echo "Generating hex file ${CMAKE_PROJECT_NAME}.hex"
-    TARGET ${CMAKE_PROJECT_NAME}
-    POST_BUILD
-    COMMAND ${CMAKE_OBJCOPY}
--O ihex ${TARGET_ELF} ${CMAKE_BINARY_DIR}/${CMAKE_PROJECT_NAME}.hex
-    #COMMENT "Generating .hex file"
-)
+    # Command to append CRC32 to .bin file (required for STM32 firmware update)
+    add_custom_command(
+        COMMAND ${CMAKE_COMMAND} -E echo "Appending CRC32 to ${CMAKE_PROJECT_NAME}.bin"
+        TARGET ${CMAKE_PROJECT_NAME}
+        POST_BUILD
+        COMMAND python ${CMAKE_SOURCE_DIR}/tools/append_crc32.py ${CMAKE_BINARY_DIR}/${CMAKE_PROJECT_NAME}.bin
+    )
+
+    # Command to generate .hex file
+    add_custom_command(
+        COMMAND ${CMAKE_COMMAND} -E echo "Generating hex file ${CMAKE_PROJECT_NAME}.hex"
+        TARGET ${CMAKE_PROJECT_NAME}
+        POST_BUILD
+        COMMAND ${OBJCOPY_TOOL}
+    -O ihex ${TARGET_ELF} ${CMAKE_BINARY_DIR}/${CMAKE_PROJECT_NAME}.hex
+        #COMMENT "Generating .hex file"
+    )
+else()
+    message(WARNING "arm-none-eabi-objcopy not found; skipping .bin/.hex/CRC post-build steps")
+endif()
 
 # Optional: Command to display memory usage (only if size tool is available)
 find_program(SIZE_TOOL arm-none-eabi-size)

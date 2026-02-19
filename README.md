@@ -106,6 +106,11 @@ On device:
 - Open **Settings -> Firmware update -> USB DFU mode**
 - Confirm entry (RIGHT/OK)
 
+Quick checklist before entering DFU:
+- Use a USB data cable (not charge-only)
+- Keep battery above 50%
+- Close serial terminal apps that may hold the USB interface
+
 CLI shortcut:
 ```bash
 dfu
@@ -117,6 +122,24 @@ dfu-util -a 0 -D MonstaTek_M1_v0802-ChrisUFO.bin
 ```
 
 If `dfu-util` does not detect the device, use STM32CubeProgrammer in USB mode and verify USB cable/data support.
+
+Troubleshooting and recovery:
+- If DFU does not enumerate: unplug/replug USB, retry DFU entry, then use STM32CubeProgrammer USB connect flow
+- If transfer fails mid-way: re-enter DFU and retry flashing; do not power off during transfer
+- If app boot fails after a bad flash: recover over SWD (ST-Link + STM32CubeProgrammer) at `0x08000000`
+
+Tested matrix (current fork):
+
+| Item | Tested |
+|------|--------|
+| Device | M1 (STM32H573VIT6), HW rev 2.x |
+| Host OS | Windows 11 |
+| DFU host tools | `dfu-util` (CLI), STM32CubeProgrammer (GUI/CLI) |
+| Entry methods | On-device menu entry, CLI `dfu` |
+
+Known limitations:
+- No dedicated hardware button-chord DFU entry is implemented yet
+- If `arm-none-eabi-objcopy` is not available in PATH, CMake still builds `.elf` but skips `.bin/.hex` post-build artifacts
 
 ### ESP32 Firmware (WiFi/Bluetooth Module)
 

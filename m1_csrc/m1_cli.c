@@ -242,7 +242,7 @@ BaseType_t cmd_dfu(char *pcWriteBuffer, size_t xWriteBufferLen, const char *pcCo
 	(void)num_of_params;
 
 	strcpy(pcWriteBuffer, "Rebooting to USB DFU mode...\r\n");
-	firmware_update_usb_dfu_mode();
+	firmware_update_usb_dfu_mode_cli();
 	return pdFALSE;
 } // BaseType_t cmd_dfu(char *pcWriteBuffer, size_t xWriteBufferLen, const char *pcCommandString, uint8_t num_of_params)
 

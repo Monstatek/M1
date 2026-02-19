@@ -29,6 +29,7 @@
 
 #define FLASH_BL_ADDRESS	0x08000000
 #define FLASH_SYSTEM_MEMORY_ADDRESS	0x0BF97000
+#define DFU_CONFIRM_TIMEOUT_MS	10000
 
 #define M1_LOGDB_TAG		"FW-UPDATE"
 
@@ -56,9 +57,10 @@ void firmware_update_exit(void);
 void firmware_update_gui_update(const S_M1_Menu_t *phmenu, uint8_t sel_item);
 void firmware_update_get_image_file(void);
 void firmware_update_start(void);
-static void firmware_update_info_box(uint8_t sel_item);
 static bool firmware_update_usb_dfu_confirm(void);
+static void firmware_update_usb_dfu_request_and_reset(void);
 void firmware_update_usb_dfu_mode(void);
+void firmware_update_usb_dfu_mode_cli(void);
 void firmware_update_enter_usb_dfu(void);
 
 /*************** F U N C T I O N   I M P L E M E N T A T I O N ****************/
@@ -288,7 +290,7 @@ void firmware_update_gui_update(const S_M1_Menu_t *phmenu, uint8_t sel_item)
 	    	case 2: // USB DFU mode
 				m1_info_box_display_draw(INFO_BOX_ROW_1, "ROM bootloader mode");
 				m1_info_box_display_draw(INFO_BOX_ROW_2, "Use dfu-util/CubeProg");
-				m1_info_box_display_draw(INFO_BOX_ROW_3, "OK/RIGHT: enter");
+				m1_info_box_display_draw(INFO_BOX_ROW_3, "OK: reboot into DFU");
 				break;
 
 	    	default: // Unknown selection
@@ -470,6 +472,8 @@ static bool firmware_update_usb_dfu_confirm(void)
 	S_M1_Main_Q_t q_item;
 	S_M1_Buttons_Status this_button_status;
 	BaseType_t ret;
+	TickType_t start_tick;
+	TickType_t elapsed;
 
 	m1_u8g2_firstpage();
 	do
@@ -478,12 +482,23 @@ static bool firmware_update_usb_dfu_confirm(void)
 		u8g2_DrawStr(&m1_u8g2, 4, 12, "Enter USB DFU mode?");
 		u8g2_DrawStr(&m1_u8g2, 4, 26, "RIGHT/OK: Yes");
 		u8g2_DrawStr(&m1_u8g2, 4, 38, "LEFT/BACK: No");
-		u8g2_DrawStr(&m1_u8g2, 4, 52, "Device will reboot");
+		u8g2_DrawStr(&m1_u8g2, 4, 52, "Timeout in 10 sec");
 	} while (m1_u8g2_nextpage());
+
+	start_tick = xTaskGetTickCount();
 
 	while (1)
 	{
-		ret = xQueueReceive(main_q_hdl, &q_item, portMAX_DELAY);
+		ret = xQueueReceive(main_q_hdl, &q_item, pdMS_TO_TICKS(200));
+
+		elapsed = xTaskGetTickCount() - start_tick;
+		if (elapsed >= pdMS_TO_TICKS(DFU_CONFIRM_TIMEOUT_MS))
+		{
+			xQueueReset(main_q_hdl);
+			M1_LOG_I(M1_LOGDB_TAG, "USB DFU confirm timeout\r\n");
+			return false;
+		}
+
 		if (ret != pdTRUE)
 			continue;
 		if (q_item.q_evt_type != Q_EVENT_KEYPAD)
@@ -512,6 +527,28 @@ static bool firmware_update_usb_dfu_confirm(void)
 
 /*============================================================================*/
 /*
+ * Persist DFU request and perform controlled reset.
+ */
+/*============================================================================*/
+static void firmware_update_usb_dfu_request_and_reset(void)
+{
+	m1_u8g2_firstpage();
+	do
+	{
+		u8g2_SetFont(&m1_u8g2, M1_DISP_MAIN_MENU_FONT_N);
+		u8g2_DrawStr(&m1_u8g2, 4, 20, "Preparing USB DFU...");
+		u8g2_DrawStr(&m1_u8g2, 4, 36, "Rebooting now");
+	} while (m1_u8g2_nextpage());
+
+	startup_config_write(BK_REGS_SELECT_DEV_OP_STAT, DEV_OP_STATUS_USB_DFU_REQUEST);
+	M1_LOG_I(M1_LOGDB_TAG, "USB DFU mode requested. Rebooting...\r\n");
+	vTaskDelay(pdMS_TO_TICKS(150));
+	NVIC_SystemReset();
+}
+
+
+/*============================================================================*/
+/*
  * This function requests USB DFU mode through reboot.
  */
 /*============================================================================*/
@@ -522,12 +559,19 @@ void firmware_update_usb_dfu_mode(void)
 		M1_LOG_I(M1_LOGDB_TAG, "USB DFU mode canceled by user\r\n");
 		return;
 	}
-
-	startup_config_write(BK_REGS_SELECT_DEV_OP_STAT, DEV_OP_STATUS_USB_DFU_REQUEST);
-	M1_LOG_I(M1_LOGDB_TAG, "USB DFU mode requested. Rebooting...\r\n");
-	vTaskDelay(pdMS_TO_TICKS(50));
-	NVIC_SystemReset();
+	firmware_update_usb_dfu_request_and_reset();
 } // void firmware_update_usb_dfu_mode(void)
+
+
+/*============================================================================*/
+/*
+ * Request USB DFU mode from CLI without keypad confirmation.
+ */
+/*============================================================================*/
+void firmware_update_usb_dfu_mode_cli(void)
+{
+	firmware_update_usb_dfu_request_and_reset();
+} // void firmware_update_usb_dfu_mode_cli(void)
 
 
 /*============================================================================*/
@@ -549,9 +593,18 @@ void firmware_update_enter_usb_dfu(void)
 		return;
 	}
 
-	USBD_Stop(&hUsbDeviceFS);
-	USBD_DeInit(&hUsbDeviceFS);
-	HAL_PCD_DeInit(&hpcd_USB_DRD_FS);
+	if (USBD_Stop(&hUsbDeviceFS) != USBD_OK)
+	{
+		M1_LOG_I(M1_LOGDB_TAG, "USBD_Stop failed\r\n");
+	}
+	if (USBD_DeInit(&hUsbDeviceFS) != USBD_OK)
+	{
+		M1_LOG_I(M1_LOGDB_TAG, "USBD_DeInit failed\r\n");
+	}
+	if (HAL_PCD_DeInit(&hpcd_USB_DRD_FS) != HAL_OK)
+	{
+		M1_LOG_I(M1_LOGDB_TAG, "HAL_PCD_DeInit failed\r\n");
+	}
 
 	HAL_RCC_DeInit();
 
