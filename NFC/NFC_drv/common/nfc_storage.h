@@ -49,7 +49,7 @@ nfc_storage_result_t nfc_storage_load_file(
 
 
 
-/*  Storage file text line format (Flipper compatible)
+/*  Storage file text line format (M1 NFC device)
  *
  *  Filetype: M1 NFC device
  *  Version: 4

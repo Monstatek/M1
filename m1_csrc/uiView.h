@@ -3,7 +3,7 @@
 /*
  * uiView.h
  *
- *      Author: pgcho
+ *      Author: Thomas
  */
 
 #ifndef UIVIEW_H_

@@ -1,14 +1,17 @@
 /* See COPYING.txt for license details. */
 
 /*
-*
-*  m1_lp5814.h
-*
-* Library for LP5814 RGB led driver
-*
-* M1 Project
-*
-*/
+ * LP5814 RGB LED Driver
+ *
+ * Partially developed with reference to:
+ * https://github.com/rickkas7/LP5562-RK
+ *
+ * Original project licensed under the MIT License.
+ *
+ * Adapted and modified for LP5814 hardware by Monstatek.
+ *
+ * Copyright (C) 2026 Monstatek
+ */
 #ifndef M1_LP5814_H_
 #define M1_LP5814_H_
 

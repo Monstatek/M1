@@ -171,8 +171,6 @@ bool lfrfid_profile_save(const char *fp, const PLFRFID_TAG_INFO data)
 /*============================================================================*/
 LFRFIDProtocol lfrfid_get_protocol_by_name(const char* name)
 {
-
-
     for(size_t i = 0; i < LFRFIDProtocolMax; i++) {
         if(strcmp(name, protocol_get_name(i)) == 0) {
             return i;

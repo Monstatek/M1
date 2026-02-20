@@ -61,7 +61,6 @@ void LFRFID_Timebase_Init(uint32_t freq_hz, uint32_t period_us);
 void TIM3_IRQHandler(void)
 {
   HAL_TIM_IRQHandler(&Timerhdl_RfIdTIM3);
-    // 1) 플래그 체크 & 클리어 (레지스터 직접)
 
 } // TIM3_IRQHandler
 
@@ -80,7 +79,7 @@ void TIM5_IRQHandler(void)
 	if ((sr & TIM_SR_CC4IF) && (dier & TIM_DIER_CC4IE))
 	{
       rfid_read_handler(&Timerhdl_RfIdTIM5);
-      TIM5->SR = ~TIM_SR_CC4IF;  // 또는 SR &= ~TIM_SR_CC4IF; (주의: 다른 플래그)
+      TIM5->SR = ~TIM_SR_CC4IF;
 	}
 	if ((sr & TIM_SR_UIF) && (dier & TIM_DIER_UIE))
 	{
@@ -131,13 +130,11 @@ void rfid_read_handler(TIM_HandleTypeDef *htim)
     if(ccr < 7 || ccr > 1000)	// filter
     	return;
 
-    // 레벨 읽기 (이중 샘플로 노이즈 방어 가능)
     uint8_t lvl1 = (RFID_RF_IN_GPIO_Port->IDR & LFRFID_RFIN_PIN_MASK) ? GPIO_PIN_SET : GPIO_PIN_RESET;
     //__NOP(); __NOP();
     //uint8_t lvl2 = (RFID_RF_IN_GPIO_Port->IDR & LFRFID_RFIN_PIN_MASK) ? GPIO_PIN_SET : GPIO_PIN_RESET;
     //uint8_t level = (lvl1 == lvl2) ? lvl1 : lvl2;
 
-    // 1) 임시배치 버퍼에 이벤트 1개 저장
     if (isr_batch_index < LFR_BATCH_ITEMS)
     {
         isr_batch[isr_batch_index].t_us    = ccr;
@@ -145,7 +142,6 @@ void rfid_read_handler(TIM_HandleTypeDef *htim)
         isr_batch_index++;
     }
 
-    // 2) 최소 개수(LFR_BATCH_ITEMS) 모이면 스트림버퍼로 한 번에 전송
     if (isr_batch_index >= LFR_BATCH_ITEMS)
     {
     	if(lfrfid_sb_hdl)
@@ -161,14 +157,10 @@ void rfid_read_handler(TIM_HandleTypeDef *htim)
 
 			if (sent == LFR_TRIGGER_BYTES)
 			{
-				// 전송 성공 → 인덱스 리셋
 				isr_batch_index = 0;
 			}
 			else
 			{
-				// 버퍼 꽉 찐 상황 → 드롭/플래그 등 처리
-				// e.g. lfr_overflow_cnt++;
-				// 일단 이 배치는 버림
 				isr_batch_index = 0;
 			}
 
@@ -235,7 +227,6 @@ void lfrfid_emul_hw_init(void)
     // 100us
     LFRFID_Timebase_Init(1000000, 100);	// 1Mhz, 100us
 
-    // 타이머 인터럽트 모드로 시작
     HAL_TIM_Base_Start_IT(&Timerhdl_RfIdTIM5);
 }
 
@@ -283,11 +274,8 @@ void LFRFID_Timebase_Init(uint32_t freq_hz, uint32_t period_us)
 
     Timerhdl_RfIdTIM5.Instance = TIM5;
 
-    // 1) 타이머 클럭: PCLK1 사용
     uint32_t tim_clk = HAL_RCC_GetPCLK1Freq();  // 예: 75000000 (75 MHz)
 
-    // 2) prescaler 계산: 원하는 freq_hz에 맞게 설정
-    // 목표: TIM의 카운터 주파수 = freq_hz (예: 1MHz → 1us 단위)
     uint32_t presc = tim_clk / freq_hz;
     if (presc == 0U) presc = 1U;
 
@@ -296,8 +284,6 @@ void LFRFID_Timebase_Init(uint32_t freq_hz, uint32_t period_us)
     Timerhdl_RfIdTIM5.Init.ClockDivision     = TIM_CLOCKDIVISION_DIV1;
     Timerhdl_RfIdTIM5.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
 
-    // 3) ARR 설정: period_us 단위만큼 카운트 → 인터럽트 발생
-    // freq_hz = 1MHz라면 1us당 1카운트
     Timerhdl_RfIdTIM5.Init.Period = period_us - 1U;
     if (Timerhdl_RfIdTIM5.Init.Period == 0xFFFFFFFF) Timerhdl_RfIdTIM5.Init.Period = 0xFFFE;
 
@@ -306,7 +292,6 @@ void LFRFID_Timebase_Init(uint32_t freq_hz, uint32_t period_us)
         Error_Handler();
     }
 
-    // 4) NVIC 인터럽트 설정
     HAL_NVIC_SetPriority(TIM5_IRQn, configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY-1, 0);
     HAL_NVIC_EnableIRQ(TIM5_IRQn);
 }

@@ -637,7 +637,7 @@ bool ListenIni(void)
                 /* Type 4A (ISO-DEP / DESFire series) */
                 g_persona = EMU_PERSONA_T4T;
                 platformLog("[CE] Persona=T4T ATQA=%02X%02X SAK=%02X\r\n", emuA.atqa[0], emuA.atqa[1], emuA.sak);
-                discParam.lmConfigPA.SEL_RES     = 0x00; // Force SAK 0x00 to be recognized as T4T Flipper card (temporary)
+                discParam.lmConfigPA.SEL_RES     = 0x00; // Force SAK 0x00 for T4T compatibility with common NFC readers (temporary)
             } else if (emuA.atqa[0] == 0x44 && emuA.atqa[1] == 0x00 && emuA.sak == 0x00) {
                 /* NTAG/Ultralight (Type 2) */
                 g_persona = EMU_PERSONA_T2T;
@@ -684,7 +684,7 @@ bool ListenIni(void)
  * Non-blocking function called periodically from FreeRTOS task.
  * Uses discParam initialized by ListenerIni() to enter Listen mode.
  * After REQA / ANTICOLL / SELECT, when RFAL_NFC_STATE_ACTIVATED is reached,
- * card type is visible in Flipper based on UID / ATQA / SAK.
+ * card type is visible on the reader (UID / ATQA / SAK).
  * At this stage, memory emulation is not performed,
  * and T2T / MFC commands are minimally responded to or ignored.
  * 

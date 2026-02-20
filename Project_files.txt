@@ -1,37 +1,23 @@
 �   .cproject
-�   .gitignore
 �   .mxproject
 �   .project
 �   ARCHITECTURE.md
 �   CHANGELOG.md
-�   Changes log.txt
 �   CMakeLists.txt
 �   CMakePresets.json
+�   COPYING.txt
 �   DEVELOPMENT.md
 �   HARDWARE.md
 �   LICENSE
 �   MonstaTek_M1_v0800 Debug.launch
 �   MonstaTek_M1_v0800 Release.launch
 �   MonstaTek_M1_v0800.ioc
-�   Project
 �   Project_files.txt
 �   README.md
+�   README_License.md
 �   STM32H573VITX_FLASH.ld
 �   STM32H573VITX_RAM.ld
 �   
-����.github
-�   �   CODE_OF_CONDUCT.md
-�   �   CONTRIBUTING.md
-�   �   CONTRIBUTORS.md
-�   �   GUIDELINES.md
-�   �   New Text Document.txt
-�   �   PULL_REQUEST_TEMPLATE.md
-�   �   SECURITY.md
-�   �   
-�   ����ISSUE_TEMPLATE
-�           bug_report.md
-�           feature_request.md
-�           
 ����.settings
 �       com.st.stm32cube.ide.mcu.sfrview.prefs
 �       language.settings.xml
@@ -950,7 +936,6 @@
 �   �                   rfal_iso15693_2.h
 �   �                   rfal_isoDep.c
 �   �                   rfal_nfc.c
-�   �                   rfal_nfc.c.bak
 �   �                   rfal_nfca.c
 �   �                   rfal_nfcb.c
 �   �                   rfal_nfcDep.c
@@ -974,19 +959,14 @@
 �       �       nfc_storage.c
 �       �       nfc_storage.h
 �       �       
-�       ����core
-�       ����hal
 �       ����legacy
-�       �       nfc_driver.c
-�       �       nfc_driver.h
-�       �       nfc_listener.c
-�       �       nfc_listener.h
-�       �       nfc_poller.c
-�       �       nfc_poller.h
-�       �       
-�       ����mf_classic
-�       ����protocols
-�       ����task
+�               nfc_driver.c
+�               nfc_driver.h
+�               nfc_listener.c
+�               nfc_listener.h
+�               nfc_poller.c
+�               nfc_poller.h
+�               
 ����out
 �   ����build
 �       ����gcc-14_2_build-debug
@@ -999,6 +979,7 @@
 �       �   �   MonstaTek_M1_v0800.bin
 �       �   �   MonstaTek_M1_v0800.elf
 �       �   �   MonstaTek_M1_v0800.hex
+�       �   �   MonstaTek_M1_v0800_wCRC.bin
 �       �   �   
 �       �   ����.cmake
 �       �   �   ����api
@@ -1008,13 +989,13 @@
 �       �   �           �           query.json
 �       �   �           �           
 �       �   �           ����reply
-�       �   �                   cache-v2-ee4758b5fd5167ba05d7.json
-�       �   �                   cmakeFiles-v1-61e2428269b2b08711af.json
-�       �   �                   codemodel-v2-b3ca3dcb879d3d1d7e95.json
+�       �   �                   cache-v2-68a22b2e59bd6e10a67a.json
+�       �   �                   cmakeFiles-v1-be91366133d2e6da4778.json
+�       �   �                   codemodel-v2-bce11056e965ba9fc554.json
 �       �   �                   directory-.-Debug-d0094a50bb2071803777.json
 �       �   �                   directory-cmake.m1_01-Debug-c92f5447119936ef7780.json
-�       �   �                   index-2026-02-05T01-02-55-0988.json
-�       �   �                   target-MonstaTek_M1_v0800-Debug-c6da61084e98b404c90c.json
+�       �   �                   index-2026-02-19T23-37-05-0179.json
+�       �   �                   target-MonstaTek_M1_v0800-Debug-d39e320e28295787fc33.json
 �       �   �                   toolchains-v1-228fa0768748194f9d27.json
 �       �   �                   
 �       �   ����cmake
@@ -1057,7 +1038,9 @@
 �           �   MonstaTek_M1_v0800.bin
 �           �   MonstaTek_M1_v0800.elf
 �           �   MonstaTek_M1_v0800.hex
+�           �   MonstaTek_M1_v0800.list
 �           �   MonstaTek_M1_v0800.map
+�           �   MonstaTek_M1_v0800_wCRC.bin
 �           �   
 �           ����.cmake
 �           �   ����api
@@ -1067,13 +1050,13 @@
 �           �           �           query.json
 �           �           �           
 �           �           ����reply
-�           �                   cache-v2-d5494556695a1dfc1c0f.json
-�           �                   cmakeFiles-v1-dd9da09190df4c0657f5.json
-�           �                   codemodel-v2-69c3591442d00c5c2ae2.json
+�           �                   cache-v2-3480e525d0b5f794c76a.json
+�           �                   cmakeFiles-v1-ca3dd17a0191376e8d94.json
+�           �                   codemodel-v2-066cc252973be73ca18d.json
 �           �                   directory-.-Release-d0094a50bb2071803777.json
 �           �                   directory-cmake.m1_01-Release-c92f5447119936ef7780.json
-�           �                   index-2026-02-05T01-38-05-0887.json
-�           �                   target-MonstaTek_M1_v0800-Release-6dbe8303314fa3d84bdf.json
+�           �                   index-2026-02-19T23-36-45-0150.json
+�           �                   target-MonstaTek_M1_v0800-Release-324e9b2f34e985cadfea.json
 �           �                   toolchains-v1-228fa0768748194f9d27.json
 �           �                   
 �           ����cmake
@@ -1111,12 +1094,15 @@
 �       MonstaTek_M1_v0800.bin
 �       MonstaTek_M1_v0800.elf
 �       MonstaTek_M1_v0800.hex
+�       MonstaTek_M1_v0800.list
 �       MonstaTek_M1_v0800.map
+�       MonstaTek_M1_v0800_wCRC.bin
 �       objects.list
 �       objects.mk
 �       sources.mk
 �       
 ����scripts
+�   �   add_gpl_license_ref.py
 �   �   program.jlink
 �   �   
 �   ����debug

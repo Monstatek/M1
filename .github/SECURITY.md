@@ -14,7 +14,7 @@ currently being supported with security updates.
 
 ## Reporting a Vulnerability
 
-Please report (suspected) security vulnerabilities through [GitHub Security Advisories](https://github.com/YOUR_ORG/m1_01/security/advisories/new). Do not open public issues for security vulnerabilities. You will receive a response within 48 hours. If the issue is confirmed, we will release a patch as soon as possible depending on complexity.
+Please report (suspected) security vulnerabilities through [GitHub Security Advisories](https://github.com/Monstatek/M1/security/advisories/new). Do not open public issues for security vulnerabilities. You will receive a response within 48 hours. If the issue is confirmed, we will release a patch as soon as possible depending on complexity.
 
 ### Security Considerations for M1 Project
 

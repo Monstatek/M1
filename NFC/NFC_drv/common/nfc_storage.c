@@ -261,11 +261,8 @@ static nfc_storage_result_t nfc_storage_parse_header_ini(
     data.buf = buf;
     data.max_len = sizeof(buf);
     if (!isValidHeaderField(&data, "M1 NFC device", "4", file_path)) {
-        /* Try Flipper format as fallback */
-        if (!isValidHeaderField(&data, "Flipper NFC device", "4", file_path)) {
-            platformLog("Filetype/Version Parsing Fail\r\n");
-            return NFC_STORAGE_ERR_FORMAT;
-        }
+        platformLog("Filetype/Version Parsing Fail\r\n");
+        return NFC_STORAGE_ERR_FORMAT;
     }
     saw_filetype = true;
 

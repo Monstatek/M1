@@ -12,6 +12,8 @@ The M1 firmware provides support for:
 - **LF RFID** (125 kHz)
 - **Sub-GHz** (315–915 MHz)
 - **Infrared** (IR transmit/receive)
+- **Bluetooth** (BLE scan, advertise, GATT; via ESP32 co-processor)
+- **WiFi** (AP scan, station/AP modes; via ESP32 co-processor)
 - **Battery** monitoring
 - **Display** (ST7586s ERC240160)
 - **USB** (CDC, MSC)
@@ -30,6 +32,8 @@ See [HARDWARE.md](HARDWARE.md) for more details.
 - [Development](DEVELOPMENT.md) – Development guidelines
 
 ## Building
+
+**See [documentation/mbt.md](documentation/mbt.md) for full build instructions** (STM32CubeIDE and VS Code setup, extensions, and optional post-build CRC).
 
 ### Prerequisites
 

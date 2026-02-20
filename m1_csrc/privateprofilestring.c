@@ -248,15 +248,6 @@ bool isValidHeaderField(ParsedValue *data, const char* filetype, const char* ver
      return 1;
  }
 
-
- /************************************************************************
- * Function:     get_private_profile_int()
- * Arguments:    <char *> section - the name of the section to search for
- *               <char *> entry - the name of the entry to find the value of
- *               <int> def - the default value in the event of a failed read
- *               <char *> file_name - the name of the .ini file to read from
- * Returns:      the value located at entry
- *************************************************************************/
 #define TOKEN_COLON ':'
 
  /*============================================================================*/
@@ -266,9 +257,7 @@ bool isValidHeaderField(ParsedValue *data, const char* filetype, const char* ver
    * @retval
    */
  /*============================================================================*/
- /* ================================
-  *  ?�?�문??무시 문자??비교 (strcasecmp ?��?
-  * ================================ */
+
  static int stricmp_nocase(const char *a, const char *b)
  {
      unsigned char ca, cb;
@@ -298,10 +287,7 @@ bool isValidHeaderField(ParsedValue *data, const char* filetype, const char* ver
    * @retval
    */
  /*============================================================================*/
- /* ================================
-  *  ?��? ?�퍼: 공백 구분 Hex 문자????배열
-  *  ?? "36 00 88 F8 82" ??{0x36,0x00,0x88,0xF8,0x82}
-  * ================================ */
+
  static int parse_hex_array_space(const char *str, uint8_t *out, int max_len)
  {
      int count = 0;
@@ -312,29 +298,25 @@ bool isValidHeaderField(ParsedValue *data, const char* filetype, const char* ver
 
      while (*str && count < max_len) {
 
-         /* ?�쪽 공백 ?�킵 */
          while (*str == ' ')
              str++;
 
          if (*str == '\0')
              break;
 
-         /* ?�큰 ?�나 복사 */
          int t = 0;
          while (*str != ' ' && *str != '\0' && t < (int)sizeof(token) - 1) {
              token[t++] = *str++;
          }
          token[t] = '\0';
 
-         /* 16진수�?변??*/
          unsigned int value;
          if (sscanf(token, "%x", &value) == 1) {
              out[count++] = (uint8_t)value;
          }
-         /* ?�못???�큰?� 그냥 ?�킵 */
      }
 
-     return count; // 변?�된 바이????
+     return count;
  }
 
 
@@ -345,10 +327,7 @@ bool isValidHeaderField(ParsedValue *data, const char* filetype, const char* ver
    * @retval
    */
  /*============================================================================*/
- /* ================================
-  *  ?��? ?�퍼: bool ?�스???�싱
-  *  지?? "1","0","true","false","on","off" (?�?�문??무시)
-  * ================================ */
+
  static bool parse_bool_text(const char *str, bool *out)
  {
      if (str == NULL || out == NULL) return false;
@@ -381,54 +360,17 @@ bool isValidHeaderField(ParsedValue *data, const char* filetype, const char* ver
  static int parse_hex_count(const char *str)
  {
      int count = 0;
-#if 0
-     while (*str) {
 
-         /* ?�쪽 공백 ?�킵 */
-         while (*str == ' ')
-             str++;
-
-         /* 종료 */
-         if (*str == '\0')
-             break;
-
-         /* ?�나???�큰 ?�작 ??개수 증�? */
-         count++;
-
-         /* ?�음 공백 ?�는 종료까�? ?�동 */
-         while (*str != ' ' && *str != '\0')
-             str++;
-     }
-#else
      char *tok = strtok((char*)str, " ");
 
      while (tok != NULL) {
     	 count++;
     	 tok = strtok(NULL, " ");
      }
-#endif
+
      return count;
  }
 
-
- /* ================================
-  *  ?�합 ?�서: parse_value()
-  *
-  *  text:  ?�싱??문자??(?? "36 00 88 F8 82", "123", "true", "3.14")
-  *  val :  type / buf / max_len ?�정 ???�출
-  *
-  *  - VALUE_TYPE_HEX_ARRAY:
-  *      buf     : uint8_t* 버퍼
-  *      max_len : buf ?�기
-  *      결과    : buf??바이??채우�? v.hex.out_len ??개수 ?�??
-  *
-  *  - VALUE_TYPE_STRING:
-  *      buf     : char* 버퍼
-  *      max_len : 버퍼 ?�기
-  *      결과    : buf??문자??복사 (null-terminated)
-  *
-  *  반환�? true = ?�공, false = ?�패
-  * ================================ */
  bool parse_value(const char *text, ParsedValue *val)
  {
      if (text == NULL || val == NULL)
@@ -477,12 +419,12 @@ bool isValidHeaderField(ParsedValue *data, const char* filetype, const char* ver
          f = strtod(text,&endptr);
 
          if (endptr == text) {
-             // 유효한 숫자를 찾지 못했습니다.
+
              return false;
          }
 
          if (errno == ERANGE) {
-             // 범위 초과 오류 발생
+
              return false;
          }
 
@@ -493,13 +435,7 @@ bool isValidHeaderField(ParsedValue *data, const char* filetype, const char* ver
 
          val->v.f = trunc(f * 1000.0) / 1000.0;
          return true;
-#if 0
-         if (sscanf(text, "%f", &f) == 1) {
-             val->v.f = f;
-             return true;
-         }
-         return false;
-#endif
+
      }
 #endif
      case VALUE_TYPE_STRING:
@@ -552,40 +488,34 @@ bool isValidHeaderField(ParsedValue *data, const char* filetype, const char* ver
     		safe_free((void*)&line_buff);
 #endif
       		f_close(&fp);
-            return (0); // EOF???�달, ?��? 찾�? 못함
+            return (0);
         }
 
         if (line_buff[0] == '#') {
-          	continue; // 주석 무시
+          	continue;
         }
 
-        // --- ?�� 콜론 기반???�확????검??로직 ?�용 ?�� ---
 
         char *colon_pos = strchr(line_buff, TOKEN_COLON);
 
         if (colon_pos != NULL) {
 
-        	// 1. 콜론 ?�치????문자(\0)�??�어 ??문자?�을 ?�시 분리
         	*colon_pos = '\0';
 
-            // 2. ??부분의 ?�뒤 공백???�거
             char *current_key = trim(line_buff);
 
-            // 3. 추출???��? 검?�하?�는 ?��? ?�확???�치?�는지 ?�인 (strcmp ?�용)
             if (strlen(current_key) == len && !strcmp(current_key, entry)) {
 
-            // 4. ?��? 찾았?��?�? 콜론??복원?�고 루프 ?�출
             	*colon_pos = TOKEN_COLON;
                 break;
             }
-            // 5. 불일�???콜론 복원?�고 ?�음 줄로 진행
+
             *colon_pos = TOKEN_COLON;
         }
-    }while( 1 ); // ?��? 찾을 ?�까지 무한 반복
+    }while( 1 );
 
-    ep = strrchr(line_buff,TOKEN_COLON);    /* 구분???��???(?�재 줄에 콜론???�음??보장) */
+    ep = strrchr(line_buff,TOKEN_COLON);
 
-    // ?�전??콜론???�었지�??�시 모�? ?�러 처리
     if (ep == NULL) {
 #if 1
     	safe_free((void*)&line_buff);
@@ -594,8 +524,8 @@ bool isValidHeaderField(ParsedValue *data, const char* filetype, const char* ver
     	return 0;
     }
 
-    ep++; // �??�작 ?�치
-    if( !strlen(ep) )          /* 값이 ?�는 경우 */
+    ep++;
+    if( !strlen(ep) )
     {
 #if 1
     	safe_free((void*)&line_buff);
@@ -784,37 +714,28 @@ bool isValidHeaderField(ParsedValue *data, const char* filetype, const char* ver
             continue;
         }
 
-     	// 2. ?�재 줄에??콜론(:)???�치�?찾습?�다. (TOKEN_COLON ?�용)
      	char *colon_pos = strchr(line_buff, TOKEN_COLON);
 
-     	// 3. 콜론??존재?�고, 콜론 ?�에 ?��? ?�다�?
      	if (colon_pos != NULL) {
 
-     		// 4. 콜론 ??문자?�을 분리?�니??
-     	    //    (콜론 ?�치????문자(\0)�??�어 문자?�을 ?�시�??�름)
      	    *colon_pos = '\0';
 
-     	    // 5. 콜론 ?�의 ??문자?�의 ?�뒤 공백???�거?�니??
      	    char *current_key = trim(line_buff);
 
-     	    // 6. ?�재 ?�의 길이?� 검?�하?�는 ?�의 길이가 같고, ???��? ?�확???�치?�는지 ?�인?�니??
      	    if (strlen(current_key) == len && !strcmp(current_key, entry)) {
 
-     	    // 7. 루프 ?�출 ?�에 콜론???�시 복원?�줍?�다 (값을 추출?�야 ?��?�?.
      	    	*colon_pos = TOKEN_COLON;
-     	        break; // ?�확???�치?�는 ?��? 찾았?��?�??�출
+     	        break;
      	    }
 
-     	    // 8. ?�치?��? ?�으�???문자�??�시 콜론?�로 복원?�고 ?�음 줄로 진행?�니??
      	    *colon_pos = TOKEN_COLON;
      	}
 
-     	// 9. �?�?처리 (콜론???�거???��? 불일�???
      	if (line_buff[0] == '\0') {
-     		break; // EOF 처리�??�어가 ????�� 추�?
+     		break;
      	}
 
-     	f_printf(&wfp,"%s\n",line_buff); // ?��? 찾�? 못한 줄�? ?�시 ?�일??복사
+     	f_printf(&wfp,"%s\n",line_buff);
     }
   
     if( line_buff[0] == '\0' )

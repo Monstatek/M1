@@ -23,7 +23,7 @@
 #include "m1_sdcard.h"
 #include "m1_esp32_hal.h"
 #include "uiView.h"
-
+#include "privateprofilestring.h"
 #include "lfrfid.h"
 
 #define M1_LOGDB_TAG	"RFID"
@@ -70,7 +70,7 @@ static void lfrfid_stream_init(void)
 {
 	lfrfid_sb_hdl = xStreamBufferCreateStatic(
         LFR_SBUF_BYTES,
-        LFR_TRIGGER_BYTES,   // ★ 트리거 레벨 = 10개 분량
+        LFR_TRIGGER_BYTES,
         sb_storage,
         &sb_ctrl
     );
@@ -215,6 +215,8 @@ void lfrfid_Init(void)
 	assert(free_heap >= M1_LOW_FREE_HEAP_WARNING_SIZE);
 
 	lfrfid_read_timeout_timer_create();
+
+	set_line_buffer_size(512);
 
 	lfrfid_encoded_data.data = malloc(sizeof(Encoded_Data_t)*ENCODED_DATA_MAX);
 	assert(lfrfid_encoded_data.data!=NULL);
@@ -390,7 +392,7 @@ void bytes_to_u32_array(BitOrder order, const uint8_t in_data[], uint32_t out_da
 //lfrfid_evt_t sample_data[120];
 void lfrfid_rxThread(void *param)
 {
-	uint8_t  batch_buf[LFR_TRIGGER_BYTES]; // 10개 분량
+	uint8_t  batch_buf[LFR_TRIGGER_BYTES];
 	memset(batch_buf,0,sizeof(batch_buf));
 
 	lfrfid_decoder_begin();
@@ -399,10 +401,8 @@ void lfrfid_rxThread(void *param)
         size_t n = xStreamBufferReceive(lfrfid_sb_hdl, batch_buf, sizeof(batch_buf), LFR_RX_TIMEOUT);
 
         if(n == 0 || lfrfid_lock == 0){
-            // 타임아웃이지만 데이터 없음 → 유지보수/유휴 처리
             continue;
         }
-        // n은 4바이트(아이템 크기)의 배수여야 정상. 아니면 남는 바이트는 다음 루프에서 합쳐짐.
 
         uint16_t total_events = n / LFR_ITEM_SIZE;
         uint8_t CHUNK_SIZE = FRAME_CHUNK_SIZE>>1;
@@ -412,7 +412,6 @@ void lfrfid_rxThread(void *param)
         {
             uint16_t events_to_process = (total_events - i < CHUNK_SIZE) ? (total_events - i) : CHUNK_SIZE;
 
-            // 10개(또는 그 이하)의 엣지를 스트림으로 처리
             for(int protoIdx=LFRFIDProtocolEM4100; protoIdx<LFRFIDProtocolMax; protoIdx++)
             {
              	if(lfrfid_decoder_execute(protoIdx, &p[i], events_to_process))

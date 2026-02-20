@@ -69,13 +69,10 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
     # Add user defined libraries
 )
 
-# +++Settings from STM32CubeIDE
-#arm-none-eabi-size  MonstaTek_M1_v0800.elf 
-#arm-none-eabi-objdump -h -S MonstaTek_M1_v0800.elf  > "MonstaTek_M1_v0800.list"
-#arm-none-eabi-objcopy  -O ihex MonstaTek_M1_v0800.elf  "MonstaTek_M1_v0800.hex"
-#arm-none-eabi-objcopy  -O binary MonstaTek_M1_v0800.elf  "MonstaTek_M1_v0800.bin"
 # Specify the output ELF file
 set(TARGET_ELF "${CMAKE_BINARY_DIR}/${CMAKE_PROJECT_NAME}.elf")
+# Specify the output BIN file
+set(TARGET_BIN "${CMAKE_BINARY_DIR}/${CMAKE_PROJECT_NAME}.bin")
 # Command to display memory usage
 add_custom_command(
     COMMAND ${CMAKE_COMMAND} -E echo "Memory usage:"    
@@ -113,4 +110,14 @@ add_custom_command(
     COMMAND ${CMAKE_OBJCOPY}
 -O ihex ${TARGET_ELF} ${CMAKE_BINARY_DIR}/${CMAKE_PROJECT_NAME}.hex
     #COMMENT "Generating .hex file"
+)
+
+# Command to generate .bin file with CRC
+add_custom_command(
+    COMMAND ${CMAKE_COMMAND} -E echo "Generating bin file with CRC ${CMAKE_PROJECT_NAME}_wCRC.bin"
+    TARGET ${CMAKE_PROJECT_NAME}
+    POST_BUILD
+    COMMAND srec_cat
+${TARGET_BIN} -binary -crop 0x0 0x000FFC14 -STM32_Little_Endian 0x000FFC14 -o ${CMAKE_BINARY_DIR}/${CMAKE_PROJECT_NAME}_wCRC.bin -binary
+    #COMMENT "Generating .bin file with CRC"
 )

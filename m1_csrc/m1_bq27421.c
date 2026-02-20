@@ -1,15 +1,18 @@
 /* See COPYING.txt for license details. */
 
 /*
-*
-* m1_bq27421.c
-*
-* bq27421, Fuel Gauge library
-* refrence : https://github.com/svcguy/lib-BQ27421/tree/master
-*
-* M1 Project
-*
-*/
+ * m1_bq27421.c
+ *
+ * Driver for Texas Instruments BQ27421
+ * 
+ * Portions of this implementation are based on:
+ * https://github.com/svcguy/lib-BQ27421
+ *
+ * Licensed under the GNU Lesser General Public License v3.0 (LGPL-3.0).
+ *
+ * Modifications:
+ * Copyright (C) 2026 Monstatek
+ */
 
 /*************************** I N C L U D E S **********************************/
 #include <string.h>
@@ -1007,22 +1010,16 @@ static inline uint16_t rd16_be(const uint8_t *buf, int msb_offs, int lsb_offs)
   * @retval
   */
 /*============================================================================*/
-// -----------------------------------------------------------------------------
-// ???? ????: ???????? ?????? BAT_INSERT + SoftReset + CFGUPMODE ????? ???
-// - ???: true  ?? ??? u?/??o?? ???? ???
-//         false ?? SOH/ExtendedData/???????/???��?? ???? ??
-// -----------------------------------------------------------------------------
+
 bool bq27421_applyConfigIfMatches(uint16_t designCapacity_mAh,
                                   uint16_t designEnergy_mWh,
                                   uint16_t terminateVoltage_mV,
                                   uint16_t taperRate)
 {
-    // 1) SOH ???? ???
     if (!bq27421_checkSohStatus()) {
         return false;
     }
 
-    // 2) Seal ???? ??? ?? ???? Unseal
     const bool wasSealed = bq27421_sealed();
     if (wasSealed) {
         bq27421_unseal();
@@ -1529,57 +1526,3 @@ uint8_t bq27421_readExtendedData(uint8_t classID, uint8_t offset)
 	return retData;
 }
 
-
-#if 0
-/*============================================================================*/
-/**
-  * @brief Write a specified number of bytes to extended data specifying a
-  * class ID, position offset.
-  * @param
-  * @retval
-  */
-/*============================================================================*/
-bool bq27421_writeExtendedData(uint8_t classID, uint8_t offset, uint8_t * data, uint8_t len)
-{
-	if (len > 32)
-		return false;
-
-	if (!_userConfigControl)
-	{
-		if (!enterConfig(false))
-			return false; // Return false if enterConfig fails
-	}
-
-	if (!blockDataControl()) // // enable block data memory control
-		return false; // Return false if enable fails
-	if (!blockDataClass(classID)) // Write class ID using DataBlockClass()
-		return false;
-
-	blockDataOffset(offset / 32); // Write 32-bit block offset (usually 0)
-	computeBlockChecksum(); // Compute checksum going in
-	uint8_t oldCsum = blockDataChecksum();
-
-	// Write data bytes:
-	for (int i = 0; i < len; i++)
-	{
-		// Write to offset, mod 32 if offset is greater than 32
-		// The blockDataOffset above sets the 32-bit block
-		if (!writeBlockData((offset % 32) + i, data[i]))
-			return false; // Return false if writeBlockData fails
-	}
-
-	// Write new checksum using BlockDataChecksum (0x60)
-	uint8_t newCsum = computeBlockChecksum(); // Compute the new checksum
-	if (!writeBlockChecksum(newCsum))
-		return false; // Return false if checksum write fails
-
-	if (!_userConfigControl)
-	{
-		delay(10); // Wait for BQ27427 to process the write
-		if (!exitConfig())
-			return false; // Return false if exitConfig fails
-	}
-
-	return true;
-}
-#endif

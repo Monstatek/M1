@@ -172,14 +172,14 @@ void m1_uiView_display_update(uint32_t param)
   * @retval None
   */
 /*============================================================================*/
-/* 타이머 콜백 (FreeRTOS가 호출) */
+
 static void prvScreenTimeoutTimerCb(TimerHandle_t xTimer)
 {
     (void)xTimer;
 
     m1_app_send_q_message(main_q_hdl, Q_EVENT_MENU_TIMEOUT);
     if (s_timeoutCallback) {
-        s_timeoutCallback();   // 여기서 실제 화면 전환 함수 호출
+        s_timeoutCallback();
     }
 }
 
@@ -191,14 +191,14 @@ static void prvScreenTimeoutTimerCb(TimerHandle_t xTimer)
   * @retval
   */
 /*============================================================================*/
-/* 1) 초기화: 시스템 시작 시 한 번만 호출 */
+
 void uiScreen_timeout_init(void)
 {
     if (s_screenTimer == NULL) {
         s_screenTimer = xTimerCreate(
             "ScrTimeout",
-            pdMS_TO_TICKS(1000), // 기본값, 실제 사용 시 변경됨
-            pdFALSE,             // one-shot 타이머
+            pdMS_TO_TICKS(1000),
+            pdFALSE,
             NULL,
             prvScreenTimeoutTimerCb
         );
@@ -213,7 +213,7 @@ void uiScreen_timeout_init(void)
   * @retval
   */
 /*============================================================================*/
-/* 2) 현재 화면에 타임아웃 설정 */
+
 void uiScreen_timeout_start(uint32_t timeout_ms, screen_timeout_cb_t cb)
 {
     if (s_screenTimer == NULL) {
@@ -237,7 +237,7 @@ void uiScreen_timeout_start(uint32_t timeout_ms, screen_timeout_cb_t cb)
   * @retval
   */
 /*============================================================================*/
-/* 3) 현재 화면 타임아웃 취소 */
+
 void uiScreen_timeout_cancel(void)
 {
     if (s_screenTimer) {
@@ -254,7 +254,7 @@ void uiScreen_timeout_cancel(void)
   * @retval
   */
 /*============================================================================*/
-/* 4) (옵션) 타임아웃 재시작 */
+
 void uiScreen_timeout_restart(uint32_t timeout_ms)
 {
     if (s_screenTimer == NULL || s_timeoutCallback == NULL) {

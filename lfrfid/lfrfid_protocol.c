@@ -1,9 +1,30 @@
 /* See COPYING.txt for license details. */
 
 /*
- * lfrfid_protocol.c
+ * LF RFID (125 kHz) implementation
  *
- *      Author: thomas
+ * Portions of the data structure definitions and table-driven
+ * architecture were adapted from the Flipper Zero firmware project.
+ *
+ * Original project:
+ * https://github.com/flipperdevices/flipperzero-firmware
+ *
+ * Copyright (C) Flipper Devices Inc.
+ * Licensed under the GNU General Public License v3.0 (GPLv3).
+ *
+ * Modifications and additional implementation:
+ * Copyright (C) 2026 Monstatek
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ *
+ * See the GNU General Public License for more details.
  */
 /*************************** I N C L U D E S **********************************/
 #include "app_freertos.h"

@@ -1,9 +1,25 @@
 /* See COPYING.txt for license details. */
 
 /*
- * t5577.c
+ * T5577 LF RFID implementation
+ *
+ * This file is derived from the Flipper Zero firmware project.
+ * The original implementation has been modified to support
+ * Monstatek hardware by adapting the hardware abstraction layer.
+ *
+ * Original project:
+ * https://github.com/flipperdevices/flipperzero-firmware
+ *
+ * Copyright (C) Flipper Devices Inc.
+ *
+ * Licensed under the GNU General Public License v3.0 (GPLv3).
+ *
+ * Modifications:
+ *   - Hardware interface adaptation for Monstatek platform
+ *   - Integration into Monstatek firmware framework
+ *
+ * Copyright (C) 2026 Monstatek
  */
-
 /*************************** I N C L U D E S **********************************/
 #include "app_freertos.h"
 #include "cmsis_os.h"
@@ -61,8 +77,7 @@ static void t5577_write_start(void)
 	lfrfid_RFIDOut_Init(125000);
 
 	HAL_TIM_PWM_Start(&Timerhdl_RfIdTIM3, TIM_CHANNEL_3);
-    // do not ground the antenna
-	//HAL_GPIO_WritePin(RFID_PULL_GPIO_Port, RFID_PULL_Pin, GPIO_PIN_SET);
+
 }
 
 
@@ -75,7 +90,6 @@ static void t5577_write_start(void)
 /*============================================================================*/
 static void t5577_write_stop(void)
 {
-	//HAL_TIM_PWM_Stop(&Timerhdl_RfIdTIM3, TIM_CHANNEL_3);
 	HAL_GPIO_WritePin(RFID_PULL_GPIO_Port, RFID_PULL_Pin, GPIO_PIN_RESET);
 }
 
@@ -129,10 +143,8 @@ static void t5577_delay_us(uint32_t us)
 /*============================================================================*/
 static void t5577_write_gap(uint32_t gap_time)
 {
-    //furi_hal_rfid_tim_read_pause();
-	HAL_TIM_PWM_Stop(&Timerhdl_RfIdTIM3, TIM_CHANNEL_3);
+	  HAL_TIM_PWM_Stop(&Timerhdl_RfIdTIM3, TIM_CHANNEL_3);
     t5577_delay_us(gap_time * 8);
-    //furi_hal_rfid_tim_read_continue();
     HAL_TIM_PWM_Start(&Timerhdl_RfIdTIM3, TIM_CHANNEL_3);
 }
 
