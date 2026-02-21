@@ -19,6 +19,11 @@ and https://www.st.com/en/development-tools/stm32cubeprog.html.
 - The code has been built with arm-none-eabi-gcc 14.2.Rel1.
 Download: https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads (14.2.Rel1)
 
+* For Linux users:
+
+- Install ARM GCC toolchain (e.g., `arm-none-eabi-gcc`), Ninja, and srecord via yay
+- On Debian/Ubuntu: `sudo apt install gcc-arm-none-eabi ninja-build srecord`
+
 - VSCode download: https://code.visualstudio.com/download
 
 Extensions installation:
@@ -48,6 +53,12 @@ ninja --version
 
 ## Build
 
+* For Linux users:
+```bash
+make
+```
+Output: `./artifacts/` (MonstaTek_M1_v0800.elf, .bin, .hex)
+
 * For Visual Studio Code users:
 - Select build type from PROJECT STATUS - Configure (gcc-14_2_build-release, gcc-14_2_build-debug).
 - Click the Build icon.
@@ -56,6 +67,9 @@ ninja --version
 Build in the IDE.
 
 ## Build directories
+
+* For Linux users:
+Firmware is built in the folder `./build/` with output copied to `./artifacts/`.
 
 * For Visual Studio Code users:
 Firmware is built in the folder ./out/build/gcc-14_2_build-release for release configuration and ./out/build/gcc-14_2_build-debug for debug configuration.

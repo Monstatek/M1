@@ -36,7 +36,7 @@
 #include "app_freertos.h"
 #include "cmsis_os.h"
 #include "main.h"
-#include "uiview.h"
+#include "uiView.h"
 
 #include "lfrfid.h"
 

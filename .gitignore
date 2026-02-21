@@ -52,3 +52,6 @@ out/
 
 # Generated compile database (contains local paths)
 compile_commands.json
+build/
+/.cache
+/artifacts
