@@ -2,7 +2,7 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
-			"type": "cppbuild",
+			"type": "shell",
 			"label": "[Release] Build project",
 			"command": "cmake",
 			"args": [
@@ -58,8 +58,26 @@
 		},
 		{
 			"type": "shell",
-			"label": "[Release] CubeProg: Flash (SWD)",
+			"label": "[Release] CubeProg (IDE): Flash (SWD)",
 			"command": "C:/Program Files/STMicroelectronics/STM32Cube/STM32CubeProgrammer/bin/STM32_Programmer_CLI",
+			"args": [
+				"--connect",
+				"port=swd",
+				"--download",
+				"${command:cmake.launchTargetPath}",
+				"-v",
+				"-hardRst",
+				"-g"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"problemMatcher": []
+		},
+		{
+			"type": "shell",
+			"label": "[Release] CubeProg (VSCode): Flash (SWD)",
+			"command": "${userHome}/AppData/Local/stm32cube/bundles/programmer/2.21.0/bin/STM32_Programmer_CLI.exe",
 			"args": [
 				"--connect",
 				"port=swd",

@@ -5,9 +5,8 @@
     "version": "0.2.0",
     "projectName": "MonstaTek_M1_v0800",
     "configurations":[
-
         {
-            "name": "Debug with ST-Link",            
+            "name": "Debug with ST-Link (IDE)",            
             "cwd": "${workspaceFolder}",
             "executable": "./out/build/gcc-14_2_build-debug/MonstaTek_M1_v0800.elf",
             "request": "launch",
@@ -15,10 +14,50 @@
             "runToEntryPoint": "main",
             "servertype": "stlink",
             "gdbPath": "",
-            "serverpath": "C:/ST/STM32CubeIDE_1.14.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.stlink-gdb-server.win32_2.1.400.202404281720/tools/bin/ST-LINK_gdbserver.exe",
-            "stlinkPath": "C:/ST/STM32CubeIDE_1.14.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.stlink-gdb-server.win32_2.1.400.202404281720/tools/bin/ST-LINK_gdbserver.exe",
-            "stm32cubeprogrammer": "C:/Program Files/STMicroelectronics/STM32Cube/STM32CubeProgrammer/bin",
-            "armToolchainPath": "C:/Program Files (x86)/Arm GNU Toolchain arm-none-eabi/14.2 rel1/bin",
+            "serverpath": "${userHome}/AppData/Local/stm32cube/bundles/stlink-gdbserver/7.12.0+st.2/bin/ST-LINK_gdbserver.exe",
+            "stlinkPath": "${userHome}/AppData/Local/stm32cube/bundles/stlink-gdbserver/7.12.0+st.2/bin/ST-LINK_gdbserver.exe",
+            "stm32cubeprogrammer": "${userHome}/AppData/Local/stm32cube/bundles/programmer/2.21.0/bin",
+            "armToolchainPath": "${userHome}/AppData/Local/stm32cube/bundles/gnu-tools-for-stm32/14.3.1+st.2/bin",
+            "serverArgs":
+            [
+                //"-p", "61234"
+                //"-d", // Enables the Serial Wire Debug (SWD) mode. Specifies that SWD is used instead of JTAG.
+                //"-e", // Specifying the option -e starts the server in persistent mode.
+                "-s", // Turns on the verification of the flash memory download.
+                "-k", // Initializes the device while under reset condition.
+                "-m", "1", // Defines the apID to debug. Mandated!
+                //"-r", "15", // Specifies the interval, in seconds, at which the hardware status is updated in the debug log file
+                //"-l", "1", // Specifies the logging level.                
+                //"-f", "./debug.log",
+                //"--frequency", "24000" // Specifies the ST-LINK communication frequency in kHz
+            ],
+            "device": "STM32H573VI",
+            "interface": "swd",
+            "serialNumber": "",
+            "preLaunchTask": "",
+            "targetProcessor": 0,
+            "preLaunchCommands": [
+                "monitor reset",
+                "monitor halt"
+            ],
+            "showDevDebugOutput": "raw",
+            //SVD file to see registers
+            "svdFile": "./scripts/debug/STM32H573.svd",
+            "v1": false
+        },
+        {
+            "name": "Debug with ST-Link (VSCode)",            
+            "cwd": "${workspaceFolder}",
+            "executable": "./out/build/gcc-14_2_build-debug/MonstaTek_M1_v0800.elf",
+            "request": "launch",
+            "type": "cortex-debug",
+            "runToEntryPoint": "main",
+            "servertype": "stlink",
+            "gdbPath": "",
+            "serverpath": "${userHome}/AppData/Local/stm32cube/bundles/stlink-gdbserver/7.12.0+st.2/bin/ST-LINK_gdbserver.exe",
+            "stlinkPath": "${userHome}/AppData/Local/stm32cube/bundles/stlink-gdbserver/7.12.0+st.2/bin/ST-LINK_gdbserver.exe",
+            "stm32cubeprogrammer": "${userHome}/AppData/Local/stm32cube/bundles/programmer/2.21.0/bin",
+            "armToolchainPath": "${userHome}/AppData/Local/stm32cube/bundles/gnu-tools-for-stm32/14.3.1+st.2/bin",
             "serverArgs":
             [
                 //"-p", "61234"
