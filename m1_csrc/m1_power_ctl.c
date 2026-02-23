@@ -28,7 +28,7 @@
 #include "m1_fusb302.h"
 #include "battery.h"
 #include "uiView.h"
-#include "res_string.h"
+#include "Res_String.h"
 
 
 #if 0

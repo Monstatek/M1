@@ -4,7 +4,7 @@
  * Res_String.c
  */
 
-#include "res_string.h"
+#include "Res_String.h"
 
 const char *szStringTable[]={
     "Emulate",

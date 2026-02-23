@@ -25,7 +25,7 @@
 #include "m1_storage.h"
 #include "m1_ring_buffer.h"
 #include "m1_sdcard_man.h"
-#include "res_string.h"
+#include "Res_String.h"
 #include "lfrfid.h"
 #include "lfrfid_file.h"
 #include "privateprofilestring.h"

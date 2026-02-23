@@ -23,7 +23,7 @@
 #include "m1_file_util.h"
 #include "privateprofilestring.h"
 #include "common/nfc_file.h"
-#include "res_string.h"
+#include "Res_String.h"
 
 /*************************** D E F I N E S ************************************/
 #define M1_LOGDB_TAG					"NFC"

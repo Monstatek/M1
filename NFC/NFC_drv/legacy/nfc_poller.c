@@ -51,7 +51,7 @@
 #include "st25r3916_com.h"
 #include "rfal_utils.h"
 
-#include "rfal_AnalogConfig.h"
+#include "rfal_analogConfig.h"
 #include "rfal_rf.h"
 #include "uiView.h"
 #include "nfc_driver.h"

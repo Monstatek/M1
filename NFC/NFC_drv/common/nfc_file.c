@@ -20,7 +20,7 @@
 #include "privateprofilestring.h"
 #include "m1_nfc.h"
 #include "logger.h"
-#include "res_string.h"
+#include "Res_String.h"
 
 #define DRIVE0_NFC     "0:/NFC"
 #define NFC_FILE_EXTENSION_TMP		"nfc"
