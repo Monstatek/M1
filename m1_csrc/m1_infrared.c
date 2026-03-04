@@ -18,8 +18,13 @@
 #include "stm32h5xx_hal.h"
 #include "main.h"
 #include "m1_infrared.h"
+#include "m1_compile_cfg.h"
 #include "irmp.h"
 #include "irsnd.h"
+
+#ifdef M1_APP_FLIPPER_COMPAT_ENABLE
+#include "m1_ir_universal.h"
+#endif
 
 
 /*************************** D E F I N E S ************************************/
@@ -208,77 +213,36 @@ S_M1_IR_Tx_States infrared_transmit(uint8_t init)
 /*============================================================================*/
 void infrared_universal_remotes(void)
 {
+#ifdef M1_APP_FLIPPER_COMPAT_ENABLE
+	/* Use the full IRDB browser and Flipper .ir file support */
+	ir_universal_init();
+	ir_universal_run();
+	ir_universal_deinit();
+#else
+	/* Fallback: basic stub that waits for BACK button */
 	S_M1_Buttons_Status this_button_status;
 	S_M1_Main_Q_t q_item;
 	BaseType_t ret;
 
 	m1_gui_let_update_fw();
 
-#if 0
-	m1_led_fast_blink(LED_BLINK_ON_RGB, LED_FASTBLINK_PWM_M, LED_FASTBLINK_ONTIME_L);
-
-	/* Graphic work starts here */
-    u8g2_FirstPage(&m1_u8g2); // This call required for page drawing in mode 1
-    do
-    {
-		// Draw icon and text for previous menu item
-		u8g2_SetFont(&m1_u8g2, M1_DISP_MAIN_MENU_FONT_N);
-		// Draw text at (x,y) = (26,15)
-		u8g2_DrawStr(&m1_u8g2, 26, 15, "Transmitting IR...");
-    } while (u8g2_NextPage(&m1_u8g2));
-
-	irmp_data.protocol = IRMP_RC5_PROTOCOL;//IRMP_RC5_PROTOCOL;//IRMP_NEC_PROTOCOL; // use NEC protocol
-	irmp_data.address  = 0x00FF; // set address to 0x00FF
-	irmp_data.command  = 0x0001; // set command to 0x0001
-	irmp_data.flags    = 1; // don't repeat frame
-
-	infrared_encode_sys_init();
-	irsnd_generate_tx_data(irmp_data); // make ota data
-	infrared_transmit(1); // initialize the tx
-#endif // #if 0
-	while (1 ) // Main loop of this task
+	while (1)
 	{
-#if 0
-		infrared_transmit(0);
-#endif // #if 0
-		// Wait for the notification from button_event_handler_task to subfunc_handler_task.
-		// This task is the sub-task of subfunc_handler_task.
-		// The notification is given in the form of an item in the main queue.
-		// So let read the main queue.
 		ret = xQueueReceive(main_q_hdl, &q_item, portMAX_DELAY);
-		if (ret==pdTRUE)
+		if (ret == pdTRUE)
 		{
-			if ( q_item.q_evt_type==Q_EVENT_KEYPAD )
+			if (q_item.q_evt_type == Q_EVENT_KEYPAD)
 			{
-				// Notification is only sent to this task when there's any button activity,
-				// so it doesn't need to wait when reading the event from the queue
 				ret = xQueueReceive(button_events_q_hdl, &this_button_status, 0);
-				if ( this_button_status.event[BUTTON_BACK_KP_ID]==BUTTON_EVENT_CLICK ) // user wants to exit?
+				if (this_button_status.event[BUTTON_BACK_KP_ID] == BUTTON_EVENT_CLICK)
 				{
-#if 0
-					m1_led_fast_blink(LED_BLINK_ON_RGB, LED_FASTBLINK_PWM_OFF, LED_FASTBLINK_ONTIME_OFF); // Turn off
-
-					; // Do extra tasks here if needed
-					if ( pir_ota_data_tx_buffer!=NULL )
-						free(pir_ota_data_tx_buffer);
-
-					infrared_encode_sys_deinit();
-#endif // #if 0
-					xQueueReset(main_q_hdl); // Reset main q before return
-					break; // Exit and return to the calling task (subfunc_handler_task)
-				} // if ( m1_buttons_status[BUTTON_BACK_KP_ID]==BUTTON_EVENT_CLICK )
-				else
-				{
-					; // Do other things for this task, if needed
+					xQueueReset(main_q_hdl);
+					break;
 				}
-			} // if ( q_item.q_evt_type==Q_EVENT_KEYPAD )
-			else if ( q_item.q_evt_type==Q_EVENT_IRRED_TX ) // Transmit completed?
-			{
-				; // Do nothing. This is just a notification to this task to take control again
 			}
-		} // if (ret==pdTRUE)
-	} // while (1 ) // Main loop of this task
-
+		}
+	}
+#endif
 } // void infrared_universal_remotes(void)
 
 

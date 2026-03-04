@@ -24,6 +24,29 @@
 #define FW_CONFIG_RESERVED_ADDRESS		0x080FFC00 // LENGTH = 1K, this address must match the one defined in the MEMORY section in the linker file
 #define FW_CRC_ADDRESS 					FW_CONFIG_RESERVED_ADDRESS + sizeof(S_M1_FW_CONFIG_t)
 
+/* === Extended CRC metadata at FIXED ABSOLUTE ADDRESSES === */
+/* These live in the 1KB reserved area AFTER the 20-byte struct */
+/* DO NOT use sizeof(S_M1_FW_CONFIG_t) to compute addresses */
+#define FW_CRC_EXT_BASE_OFFSET     20  /* Fixed: right after the 20-byte struct */
+#define FW_CRC_EXT_BASE            (FW_CONFIG_RESERVED_ADDRESS + FW_CRC_EXT_BASE_OFFSET)
+#define FW_CRC_EXT_MAGIC_ADDR      (FW_CRC_EXT_BASE + 0)   /* 0x080FFC14 */
+#define FW_CRC_EXT_SIZE_ADDR       (FW_CRC_EXT_BASE + 4)   /* 0x080FFC18 */
+#define FW_CRC_EXT_CRC_ADDR        (FW_CRC_EXT_BASE + 8)   /* 0x080FFC1C */
+
+#define FW_CRC_EXT_MAGIC_VALUE     ((uint32_t)0x43524332)   /* "CRC2" sentinel */
+#define FW_CRC_EXT_ERASED          ((uint32_t)0xFFFFFFFF)   /* Erased flash value */
+
+#define BOOT_FAIL_SIGNATURE        ((uint32_t)0xDEADBEEF)
+
+/* ROM DFU Bootloader entry point for STM32H5 */
+#define STM32H5_SYSTEM_MEMORY_ADDR ((uint32_t)0x0BF90000)
+
+typedef struct {
+    uint32_t magic;          /* 0x43524332 ("CRC2") or 0xFFFFFFFF (not present) */
+    uint32_t fw_image_size;  /* bytes of firmware to CRC (in 32-bit words for HAL) */
+    uint32_t fw_crc32;       /* the actual CRC value */
+} S_M1_FW_CRC_EXT_t;
+
 #define M1_FLASH_BANK_SIZE				0x00100000
 
 #define	FW_BOOT_MESSAGE_LF				0x0A
@@ -117,6 +140,9 @@ uint16_t bl_get_active_bank(void);
 uint8_t bl_crc_check(uint32_t image_size);
 void bl_swap_banks(void);
 void fw_gui_progress_update(size_t remainder);
+
+void boot_recovery_check(void);
+void bl_jump_to_dfu(void);
 
 extern FW_CFG_SECTION S_M1_FW_CONFIG_t m1_fw_config;
 

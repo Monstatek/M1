@@ -401,28 +401,28 @@ if (DEBUG_bytes_to_send < bytes_to_send) DEBUG_bytes_to_send = bytes_to_send;
         // Start USART1 transmission using GPDMA1 channel 1
 
         tx_cptl_usart1 = 1;
+        __DSB();  /* Ensure flag is visible before DMA starts */
 
         if (HAL_UART_Transmit_DMA(&huart_logdb, current_buffer_ptr, bytes_to_send) == HAL_OK)
         {
-#if 1
+          /* Wait for DMA completion via polling with bounded timeout.
+           * Using osDelay(1) keeps the task yielding and avoids busy-wait.
+           * A hard timeout prevents indefinite stall if DMA never completes. */
+          uint32_t dma_wait_ticks = 0;
           while (tx_cptl_usart1 == 1)
           {
             osDelay(1);
-            DEBUG_dma_timeout++;
+            dma_wait_ticks++;
+            if (dma_wait_ticks >= (uint32_t)xMaxBlockTime)
+            {
+              /* DMA completion missed — abort and recover */
+              HAL_UART_DMAStop(&huart_logdb);
+              huart_logdb.gState = HAL_UART_STATE_READY;
+              tx_cptl_usart1 = 0;
+              DEBUG_dma_timeout++;
+              break;
+            }
           }
-
-#else
-          /* Wait for DMA transfer to complete */
-          if(xSemaphoreTake(usb2ser_tx_semaphore, xMaxBlockTime) != pdTRUE)
-          {
-            //printf("DMA time out!\r\n");
-            HAL_UART_DMAStop(&huart_logdb);
-            huart_logdb.gState = HAL_UART_STATE_READY;
-
-DEBUG_dma_timeout++;
-            break;
-          }
-#endif
           //osDelay(1); //osDelay(10);
 
           current_buffer_ptr += bytes_to_send;
@@ -435,12 +435,17 @@ DEBUG_dma_timeout++;
         }
       }
 
-      // After processing all data, if it was stopped, request to resume
+      // After processing all data, if it was stopped, request to resume.
+      // Use a critical section to atomically clear the paused flag and
+      // re-arm the USB endpoint, preventing the ISR from seeing an
+      // inconsistent state between the flag and endpoint readiness.
       if (usbcdc_rx_paused == 1)
       {
+        taskENTER_CRITICAL();
         usbcdc_rx_paused = 0;
-
+        __DSB();  /* Ensure paused flag write is committed before re-arming */
         USBD_CDC_ReceivePacket(&hUsbDeviceFS);
+        taskEXIT_CRITICAL();
       }
     }
 

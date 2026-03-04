@@ -35,6 +35,9 @@
 
 /***************************** V A R I A B L E S ******************************/
 
+/* Sub-GHz RX ring buffer overflow diagnostics */
+uint32_t DEBUG_subghz_rb_overflow_cnt = 0;
+uint32_t DEBUG_subghz_rb_highwater = 0;
 
 /********************* F U N C T I O N   P R O T O T Y P E S ******************/
 
@@ -741,6 +744,18 @@ void TIM1_CC_IRQHandler(void)
 		if ( true )
 #endif // #ifdef M1_APP_SUB_GHZ_RAW_DATA_RX_NOISE_FILTER_ENABLE
 		{
+			/* Track ring buffer capacity for overflow diagnostics */
+			uint32_t rb_used = ringbuffer_get_data_slots(&subghz_rx_rawdata_rb);
+			if (rb_used > DEBUG_subghz_rb_highwater) {
+				DEBUG_subghz_rb_highwater = rb_used;
+			}
+
+			uint32_t rb_free = ringbuffer_get_empty_slots(&subghz_rx_rawdata_rb);
+			if (rb_free == 0) {
+				/* Ring buffer is full — insert will overwrite oldest data */
+				DEBUG_subghz_rb_overflow_cnt++;
+			}
+
 			m1_ringbuffer_insert(&subghz_rx_rawdata_rb, (uint8_t *)&cap_val);
 			pulse_counter++;
 			if ( pulse_counter >= SUBGHZ_RAW_DATA_SAMPLES_TO_RW )

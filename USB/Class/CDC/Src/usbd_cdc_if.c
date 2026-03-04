@@ -226,6 +226,7 @@ uint32_t DEBUG_max_usbRxBufIndex = 0;
 uint32_t DEBUG_paused_cnt = 0;
 uint32_t DEBUG_prev_data[4];
 uint32_t DEBUG_ovrl_cnt = 0;
+uint32_t DEBUG_drop_cnt = 0;       /* Bytes dropped due to intermediate buffer overflow */
 static int8_t CDC_Receive_FS(uint8_t *Buf, uint32_t *Len)
 {
   BaseType_t xHigherPriorityTaskWoken = pdFALSE;
@@ -236,34 +237,23 @@ static int8_t CDC_Receive_FS(uint8_t *Buf, uint32_t *Len)
   if (m1_usbcdc_mode == CDC_MODE_VCP)
   {
     if (h_usb_rx_streambuf == NULL || *Len == 0) {
+      /* Re-arm USB endpoint even for zero-length packets to prevent stalls */
+      USBD_CDC_ReceivePacket(&hUsbDeviceFS);
       return USBD_OK;
     }
 
-    if (strncmp((char *)DEBUG_prev_data, Buf, 4) != 0)
+    if (strncmp((char *)DEBUG_prev_data, (char *)Buf, 4) != 0)
     {
       DEBUG_ovrl_cnt++;
     }
     memcpy(DEBUG_prev_data, Buf, 4);
 
-    /* Input 64 bytes of data into usbRxBuffer */
-    if (usbRxBufIndex + *Len <= USB_RX_BUF_SIZE) {
-      memcpy(&usbRxBuffer[usbRxBufIndex], Buf, *Len);
-      usbRxBufIndex += *Len;
-
-      if (usbRxBufIndex > DEBUG_max_usbRxBufIndex) DEBUG_max_usbRxBufIndex = usbRxBufIndex;
-
-    } else {
-      /* Handle usbRxBuffer overflow */
-      //printf("Overflow - CDC RX Buffer!\r\n");
-
-      DEBUG_ovf_cnt++;
-    }
-
-    /* Check for empty space in the stream buffer */
+    /* First, try to drain the intermediate buffer into the stream buffer
+     * BEFORE appending new data. This maximizes throughput when the
+     * stream buffer was previously full and has since been partially consumed. */
     freeSpace = xStreamBufferSpacesAvailable(h_usb_rx_streambuf);
 
     if (freeSpace > 0 && usbRxBufIndex > 0) {
-      /* Transfer usbRxBuffer data to the empty space in the Stream Buffer. */
       SendBytesbf = (usbRxBufIndex < freeSpace) ? usbRxBufIndex : freeSpace;
 
       sentBytes = xStreamBufferSendFromISR(h_usb_rx_streambuf,
@@ -271,9 +261,48 @@ static int8_t CDC_Receive_FS(uint8_t *Buf, uint32_t *Len)
                                          SendBytesbf,
                                          &xHigherPriorityTaskWoken);
       if (sentBytes > 0) {
-        /* Move/remove intermediate buffer data as much as transferred to Stream Buffer. */
         if (sentBytes < usbRxBufIndex) {
-          /* Move forward if there is remaining data*/
+          memmove(usbRxBuffer,
+                  usbRxBuffer + sentBytes,
+                  usbRxBufIndex - sentBytes);
+        }
+        usbRxBufIndex -= sentBytes;
+        freeSpace -= sentBytes;
+      }
+    }
+
+    /* Append incoming USB data to the intermediate buffer */
+    if (usbRxBufIndex + *Len <= USB_RX_BUF_SIZE) {
+      memcpy(&usbRxBuffer[usbRxBufIndex], Buf, *Len);
+      usbRxBufIndex += *Len;
+
+      if (usbRxBufIndex > DEBUG_max_usbRxBufIndex) DEBUG_max_usbRxBufIndex = usbRxBufIndex;
+
+    } else {
+      /* Intermediate buffer overflow: copy what fits, drop the rest */
+      uint32_t space_left = USB_RX_BUF_SIZE - usbRxBufIndex;
+      if (space_left > 0) {
+        memcpy(&usbRxBuffer[usbRxBufIndex], Buf, space_left);
+        usbRxBufIndex += space_left;
+        DEBUG_drop_cnt += (*Len - space_left);
+      } else {
+        DEBUG_drop_cnt += *Len;
+      }
+      DEBUG_ovf_cnt++;
+    }
+
+    /* Try to drain intermediate buffer to stream buffer again (now includes new data) */
+    freeSpace = xStreamBufferSpacesAvailable(h_usb_rx_streambuf);
+
+    if (freeSpace > 0 && usbRxBufIndex > 0) {
+      SendBytesbf = (usbRxBufIndex < freeSpace) ? usbRxBufIndex : freeSpace;
+
+      sentBytes = xStreamBufferSendFromISR(h_usb_rx_streambuf,
+                                         (void *)usbRxBuffer,
+                                         SendBytesbf,
+                                         &xHigherPriorityTaskWoken);
+      if (sentBytes > 0) {
+        if (sentBytes < usbRxBufIndex) {
           memmove(usbRxBuffer,
                   usbRxBuffer + sentBytes,
                   usbRxBufIndex - sentBytes);
@@ -287,17 +316,16 @@ static int8_t CDC_Receive_FS(uint8_t *Buf, uint32_t *Len)
       }
     }
 
-    if (freeSpace == 0) {
+    /* Flow control: pause USB reception if stream buffer has no space
+     * AND intermediate buffer is getting full */
+    if (freeSpace == 0 && usbRxBufIndex >= (USB_RX_BUF_SIZE / 2)) {
       usbcdc_rx_paused = 1;
+      __DSB();  /* Ensure the paused flag write is visible to all bus masters */
     }
 
     if (usbcdc_rx_paused == 0)
     {
-//      USBD_CDC_SetRxBuffer(&hUsbDeviceFS, &Buf[0]);
-//      Buf[*Len] = 0;
       USBD_CDC_ReceivePacket(&hUsbDeviceFS);
-
-      //DEBUG_paused_cnt = 0;
     }
     else
     {

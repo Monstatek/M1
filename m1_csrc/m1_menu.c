@@ -30,6 +30,11 @@
 #include "m1_storage.h"
 #include "m1_wifi.h"
 #include "m1_bt.h"
+#include "m1_compile_cfg.h"
+
+#ifdef M1_APP_FLIPPER_COMPAT_ENABLE
+#include "m1_flipper_integration.h"
+#endif
 
 /*************************** D E F I N E S ************************************/
 
@@ -64,11 +69,24 @@ S_M1_Menu_t menu_Sub_GHz_Radio_Settings =
     "Radio Settings", sub_ghz_radio_settings, NULL, NULL, 0, 0, NULL, NULL, NULL
 };
 
+#ifdef M1_APP_FLIPPER_COMPAT_ENABLE
+S_M1_Menu_t menu_Sub_GHz_Flipper =
+{
+    "Flipper .sub", sub_ghz_replay_flipper, NULL, NULL, 0, 0, NULL, NULL, NULL
+};
+
+S_M1_Menu_t menu_Sub_GHz =
+{
+    "Sub-GHz", NULL, NULL, NULL, 5, 0, menu_m1_icon_wave, NULL,
+    {&menu_Sub_GHz_Record, &menu_Sub_GHz_Replay, &menu_Sub_GHz_Flipper, &menu_Sub_GHz_Frequency_Reader, &menu_Sub_GHz_Regional_Information}
+};
+#else
 S_M1_Menu_t menu_Sub_GHz =
 {
     "Sub-GHz", NULL, NULL, NULL, 4, 0, menu_m1_icon_wave, NULL,
     {&menu_Sub_GHz_Record, &menu_Sub_GHz_Replay, &menu_Sub_GHz_Frequency_Reader, &menu_Sub_GHz_Regional_Information}
 };
+#endif
 
 /*----------------------------- > 125KHz RFID --------------------------------*/
 
@@ -93,11 +111,24 @@ S_M1_Menu_t menu_125KHz_RFID_Utilities =
     "Utilities", rfid_125khz_utilities, NULL, NULL, 0, 0, NULL, NULL, NULL
 };
 
+#ifdef M1_APP_FLIPPER_COMPAT_ENABLE
+S_M1_Menu_t menu_125KHz_RFID_Import_Flipper =
+{
+    "Import Flipper", rfid_import_flipper, NULL, NULL, 0, 0, NULL, NULL, NULL
+};
+
+S_M1_Menu_t menu_125KHz_RFID =
+{
+    "RFID", menu_125khz_rfid_init, menu_125khz_rfid_deinit, NULL, 5, 0, menu_m1_icon_rfid, NULL,
+    {&menu_125KHz_RFID_Read, &menu_125KHz_RFID_Saved, &menu_125KHz_RFID_Add_Manually, &menu_125KHz_RFID_Import_Flipper, &menu_125KHz_RFID_Utilities}
+};
+#else
 S_M1_Menu_t menu_125KHz_RFID =
 {
     "RFID", menu_125khz_rfid_init, menu_125khz_rfid_deinit, NULL, 4, 0, menu_m1_icon_rfid, NULL,
     {&menu_125KHz_RFID_Read, &menu_125KHz_RFID_Saved, &menu_125KHz_RFID_Add_Manually, &menu_125KHz_RFID_Utilities}
 };
+#endif
 
 /*-------------------------------- > NFC -------------------------------------*/
 
@@ -116,11 +147,24 @@ S_M1_Menu_t menu_NFC_Tools =
     "Tools", nfc_tools, NULL, NULL, 0, 0, NULL, NULL, NULL
 };
 
+#ifdef M1_APP_FLIPPER_COMPAT_ENABLE
+S_M1_Menu_t menu_NFC_Import_Flipper =
+{
+    "Import Flipper", nfc_import_flipper, NULL, NULL, 0, 0, NULL, NULL, NULL
+};
+
+S_M1_Menu_t menu_NFC =
+{
+    "NFC", &menu_nfc_init, menu_nfc_deinit, NULL, 4, 0, menu_m1_icon_nfc, NULL,
+    {&menu_NFC_Read, &menu_NFC_Saved, &menu_NFC_Import_Flipper, &menu_NFC_Tools }
+};
+#else
 S_M1_Menu_t menu_NFC =
 {
     "NFC", &menu_nfc_init, menu_nfc_deinit, NULL, 3, 0, menu_m1_icon_nfc, NULL,
     {&menu_NFC_Read, &menu_NFC_Saved, &menu_NFC_Tools }
 };
+#endif
 
 /*----------------------------- > Infrared -----------------------------------*/
 

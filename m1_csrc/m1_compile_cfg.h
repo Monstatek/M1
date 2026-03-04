@@ -67,4 +67,13 @@ extern void assert_failed();
 
 #define M1_DEBUG_CLI_ENABLE	// Enable the CLI function for debugging and testing
 
+/*============================================================================*/
+/*				E N H A N C E D   F I R M W A R E   F L A G S				*/
+/*============================================================================*/
+
+#define M1_APP_CRC_EXT_ENABLE          /* Enable extended CRC boot verification */
+#define M1_APP_DFU_HWSTRAP_ENABLE      /* Enable PE11 DFU hardware strap */
+#define M1_APP_FLIPPER_COMPAT_ENABLE   /* Enable Flipper file format support */
+#define M1_APP_CRYPTO_ENABLE           /* Enable WiFi credential encryption */
+
 #endif /* M1_COMPILE_CFG_H_ */

@@ -700,3 +700,166 @@ void fw_gui_progress_update(size_t remainder)
 
 	m1_u8g2_nextpage(); // Update display RAM
 } // void fw_gui_progress_update(size_t remainder)
+
+
+
+/*============================================================================*/
+/**
+  * @brief  Jump to STM32H5 ROM USB DFU bootloader
+  * @param  None
+  * @retval None (does not return)
+  */
+/*============================================================================*/
+void bl_jump_to_dfu(void)
+{
+    /* Disable all interrupts */
+    __disable_irq();
+
+    /* Reset all peripherals */
+    HAL_RCC_DeInit();
+    HAL_DeInit();
+
+    /* Clear pending interrupts */
+    for (uint8_t i = 0; i < 8; i++) {
+        NVIC->ICER[i] = 0xFFFFFFFF;
+        NVIC->ICPR[i] = 0xFFFFFFFF;
+    }
+
+    /* Set MSP to ROM bootloader's initial stack pointer */
+    uint32_t *rom_base = (uint32_t *)STM32H5_SYSTEM_MEMORY_ADDR;
+    __set_MSP(rom_base[0]);
+
+    /* Jump to ROM bootloader reset handler */
+    void (*dfu_entry)(void) = (void (*)(void))rom_base[1];
+    dfu_entry();
+
+    /* Should never reach here */
+    while (1) {}
+}
+
+
+
+/*============================================================================*/
+/**
+  * @brief  Boot-time firmware integrity check with graceful fallback.
+  *         Called early in SystemInit() before clocks and RAM are fully set up.
+  *         Uses ONLY register-level access (no HAL dependency).
+  *
+  *         Behavior:
+  *         - If CRC extension sentinel is erased (0xFFFFFFFF): skip check, boot normally
+  *           (this handles stock Monstatek firmware with no CRC)
+  *         - If CRC extension sentinel is "CRC2" (0x43524332): validate firmware CRC
+  *           - If CRC matches: boot normally
+  *           - If CRC mismatch: attempt bank swap (once), then fall back to DFU
+  *         - If sentinel is any other value: skip check (don't brick on unknown data)
+  *
+  * @param  None
+  * @retval None
+  */
+/*============================================================================*/
+void boot_recovery_check(void)
+{
+    volatile uint32_t crc_magic;
+    volatile uint32_t fw_image_size;
+    volatile uint32_t stored_crc;
+    volatile uint32_t calc_crc;
+
+    /* Read CRC extension sentinel from fixed absolute address */
+    crc_magic = *(volatile uint32_t *)(FW_CRC_EXT_MAGIC_ADDR);
+
+    /* Case 1: No CRC present (erased flash or stock Monstatek FW) */
+    if (crc_magic == FW_CRC_EXT_ERASED) {
+        return;  /* Boot normally */
+    }
+
+    /* Case 2: Unknown sentinel value - don't brick, just boot */
+    if (crc_magic != FW_CRC_EXT_MAGIC_VALUE) {
+        return;  /* Boot normally */
+    }
+
+    /* Case 3: CRC extension is present - validate it */
+    fw_image_size = *(volatile uint32_t *)(FW_CRC_EXT_SIZE_ADDR);
+    stored_crc    = *(volatile uint32_t *)(FW_CRC_EXT_CRC_ADDR);
+
+    /* Sanity check image size */
+    if (fw_image_size == 0 || fw_image_size > M1_FLASH_BANK_SIZE ||
+        (fw_image_size & 0x3U) != 0U) {
+        return;  /* Invalid size - don't brick, just boot */
+    }
+
+    /* Enable CRC peripheral clock */
+    RCC->AHB1ENR |= RCC_AHB1ENR_CRCEN;
+    /* Brief delay for clock to stabilize */
+    volatile uint32_t dummy = RCC->AHB1ENR;
+    (void)dummy;
+
+    /* Reset CRC calculator (default polynomial 0x04C11DB7, no inversion) */
+    CRC->CR = CRC_CR_RESET;
+    __NOP(); __NOP(); __NOP(); __NOP();
+
+    /* Feed firmware data word-by-word */
+    uint32_t num_words = fw_image_size / 4;
+    volatile uint32_t *data_ptr = (volatile uint32_t *)FW_START_ADDRESS;
+    for (uint32_t i = 0; i < num_words; i++) {
+        CRC->DR = data_ptr[i];
+    }
+    calc_crc = CRC->DR;
+
+    /* Disable CRC clock */
+    RCC->AHB1ENR &= ~RCC_AHB1ENR_CRCEN;
+
+    /* CRC matches - firmware is good */
+    if (calc_crc == stored_crc) {
+        /* Clear any previous boot fail marker */
+        PWR->DBPCR |= PWR_DBPCR_DBP;  /* Enable backup domain access */
+        if (TAMP->BKP1R == BOOT_FAIL_SIGNATURE) {
+            TAMP->BKP1R = 0;
+        }
+        return;  /* Boot normally */
+    }
+
+    /* CRC mismatch - attempt recovery */
+
+    /* Enable backup domain access */
+    PWR->DBPCR |= PWR_DBPCR_DBP;
+
+    /* Check if we already tried bank swap (prevents infinite swap loop) */
+    if (TAMP->BKP1R == BOOT_FAIL_SIGNATURE) {
+        /* Both banks failed - last resort: jump to ROM DFU */
+        bl_jump_to_dfu();
+        /* Never returns */
+    }
+
+    /* Mark that we're attempting a bank swap */
+    TAMP->BKP1R = BOOT_FAIL_SIGNATURE;
+
+    /* Toggle SWAP_BANK option byte */
+    /* Unlock flash */
+    if (FLASH->NSSR & FLASH_NSSR_BSY) {
+        return;  /* Flash busy - can't swap, just boot */
+    }
+
+    FLASH->NSKEYR = 0x45670123U;
+    FLASH->NSKEYR = 0xCDEF89ABU;
+
+    /* Unlock option bytes */
+    FLASH->OPTKEYR = 0x08192A3BU;
+    FLASH->OPTKEYR = 0x4C5D6E7FU;
+
+    /* Toggle SWAP_BANK bit in OPTSR_CUR/PRG */
+    uint32_t optsr = FLASH->OPTSR_CUR;
+    if (optsr & FLASH_OPTSR_SWAP_BANK) {
+        FLASH->OPTSR_PRG = optsr & ~FLASH_OPTSR_SWAP_BANK;
+    } else {
+        FLASH->OPTSR_PRG = optsr | FLASH_OPTSR_SWAP_BANK;
+    }
+
+    /* Launch option byte change (triggers system reset) */
+    FLASH->OPTCR |= FLASH_OPTCR_OPTSTART;
+
+    /* Wait for completion - system will reset */
+    while (FLASH->NSSR & FLASH_NSSR_BSY) {}
+
+    /* If we get here, trigger manual reset */
+    NVIC_SystemReset();
+}

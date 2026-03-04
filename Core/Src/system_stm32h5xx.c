@@ -111,6 +111,13 @@
 
 #include "stm32h5xx.h"
 
+#ifdef M1_APP_CRC_EXT_ENABLE
+extern void boot_recovery_check(void);
+#endif
+#ifdef M1_APP_DFU_HWSTRAP_ENABLE
+extern void bl_jump_to_dfu(void);
+#endif
+
 /**
   * @}
   */
@@ -204,6 +211,55 @@ void SystemInit(void)
   #if (__FPU_PRESENT == 1) && (__FPU_USED == 1)
    SCB->CPACR |= ((3UL << 20U)|(3UL << 22U));  /* set CP10 and CP11 Full Access */
   #endif
+
+  /* === Boot-time firmware integrity check === */
+  /* Must run before clock configuration to catch corruption early */
+#ifdef M1_APP_CRC_EXT_ENABLE
+  boot_recovery_check();
+#endif
+
+  /* === Hardware strap DFU check === */
+  /* If PE11 (UP button) is held during power-on, jump to ROM USB DFU bootloader */
+#ifdef M1_APP_DFU_HWSTRAP_ENABLE
+  {
+    /* Enable GPIOE clock */
+    RCC->AHB2ENR |= (1U << 4);
+    volatile uint32_t tmpreg = RCC->AHB2ENR;
+    (void)tmpreg;
+
+    /* Configure PE11 as input with internal pull-up */
+    GPIOE->MODER &= ~(0x3U << (11 * 2));   /* Input mode */
+    GPIOE->PUPDR &= ~(0x3U << (11 * 2));
+    GPIOE->PUPDR |=  (0x1U << (11 * 2));    /* Pull-up */
+
+    /* Brief delay for GPIO to settle (~50us at 64MHz HSI) */
+    for (volatile int i = 0; i < 3200; i++) { __NOP(); }
+
+    /* Check if UP button is pressed (active low) */
+    if (!(GPIOE->IDR & (1U << 11))) {
+      /* Visual feedback: turn on LEDs (PD12, PD13) */
+      RCC->AHB2ENR |= (1U << 3);  /* Enable GPIOD clock */
+      tmpreg = RCC->AHB2ENR;
+      (void)tmpreg;
+      GPIOD->MODER &= ~((0x3U << (12 * 2)) | (0x3U << (13 * 2)));
+      GPIOD->MODER |=  ((0x1U << (12 * 2)) | (0x1U << (13 * 2)));  /* Output */
+      GPIOD->BSRR = (1U << 12) | (1U << 13);  /* Set high */
+
+      /* Audio feedback: click speaker on PC7 */
+      RCC->AHB2ENR |= (1U << 2);  /* Enable GPIOC clock */
+      tmpreg = RCC->AHB2ENR;
+      (void)tmpreg;
+      GPIOC->MODER &= ~(0x3U << (7 * 2));
+      GPIOC->MODER |=  (0x1U << (7 * 2));  /* Output */
+      GPIOC->BSRR = (1U << 7);  /* Speaker on */
+      for (volatile int i = 0; i < 100000; i++) { __NOP(); }
+      GPIOC->BSRR = (1U << (7 + 16));  /* Speaker off */
+
+      /* Jump to ROM DFU bootloader */
+      bl_jump_to_dfu();
+    }
+  }
+#endif
 
   /* Reset the RCC clock configuration to the default reset state ------------*/
   /* Set HSION bit */

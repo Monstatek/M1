@@ -382,6 +382,18 @@ target_sources(m1_01 INTERFACE
     ../../m1_csrc/m1_wifi.c
     ../../m1_csrc/privateprofilestring.c
     ../../m1_csrc/uiView.c
+    # === Enhanced firmware: Flipper file format parsers (Phase 2) ===
+    ../../m1_csrc/flipper_file.c
+    ../../m1_csrc/flipper_ir.c
+    ../../m1_csrc/flipper_subghz.c
+    ../../m1_csrc/flipper_nfc.c
+    ../../m1_csrc/flipper_rfid.c
+    # === Enhanced firmware: Universal Remote + Crypto (Phase 3+5) ===
+    ../../m1_csrc/m1_ir_universal.c
+    ../../m1_csrc/m1_crypto.c
+    ../../m1_csrc/m1_wifi_cred.c
+    # === Enhanced firmware: Flipper integration (Phase 6) ===
+    ../../m1_csrc/m1_flipper_integration.c
 )
 
 target_link_directories(m1_01 INTERFACE

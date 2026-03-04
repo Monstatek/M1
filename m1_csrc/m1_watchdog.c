@@ -67,6 +67,19 @@ void m1_wdt_init(void)
 	BaseType_t ret;
 	size_t free_heap;
 
+	/*
+	 * Freeze the IWDG counter when the CPU is halted by the debugger.
+	 * Without this, the IWDG fires a reset during breakpoints/stepping,
+	 * making debugging impossible with ST-Link/J-Link.
+	 * This only has effect when the debug port is connected; in production
+	 * (no debugger attached), this bit is ignored by the hardware.
+	 */
+#if defined(__HAL_DBGMCU_FREEZE_IWDG)
+	__HAL_DBGMCU_FREEZE_IWDG();
+#elif defined(DBGMCU_APB1FZR1_DBG_IWDG_STOP)
+	SET_BIT(DBGMCU->APB1FZR1, DBGMCU_APB1FZR1_DBG_IWDG_STOP);
+#endif
+
 	if(__HAL_RCC_GET_FLAG(RCC_FLAG_IWDGRST)) // Watchdog caused reset?
 	{
 		m1_device_stat.dev_reset_by_wdt = true;
@@ -356,6 +369,11 @@ void m1_wdt_send_delayed_report(S_M1_WDT_Report_ID rpt_id, uint32_t delay_ms, ui
 /******************************************************************************/
 static void m1_wdt_failure_handler(void)
 {
+	/* Disable interrupts to prevent further damage, then spin.
+	 * The IWDG will eventually fire and reset the system cleanly.
+	 * In debug mode (IWDG frozen), this acts as a breakpoint-friendly
+	 * infinite loop for post-mortem inspection. */
+	__disable_irq();
 	while (1)
 	{
 		__asm("nop");
