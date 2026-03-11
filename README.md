@@ -44,14 +44,14 @@ See [HARDWARE.md](HARDWARE.md) for more details.
 
 ### Build steps
 
-**Linux:**  
+#### Linux
 ```bash
 make
 ```
 
 Output: `./artifacts/` (MonstaTek_M1_v0800.elf, .bin, .hex)
 
-**STM32CubeIDE:**  
+#### #STM32CubeIDE
 Open the project and build in the IDE.
 
 **VS Code:**  
