@@ -8,9 +8,20 @@ set(CMAKE_CXX_COMPILER_FORCED TRUE)
 set(CMAKE_C_COMPILER_ID GNU)
 set(CMAKE_CXX_COMPILER_ID GNU)
 
+# Make things easier for macos, let the toolchain be found in a default location
+if(APPLE AND NOT DEFINED TOOLCHAIN_PATH)
+    file(GLOB ARM_TOOLCHAIN_VERSIONS "/Applications/ArmGNUToolchain/*/arm-none-eabi")
+    if(ARM_TOOLCHAIN_VERSIONS)
+        list(GET ARM_TOOLCHAIN_VERSIONS 0 FIRST_ARM_TOOLCHAIN)
+        set(TOOLCHAIN_PREFIX "${FIRST_ARM_TOOLCHAIN}/bin/arm-none-eabi-")
+    endif()
+endif()
+
 # Some default GCC settings
 # arm-none-eabi- must be part of path environment
-set(TOOLCHAIN_PREFIX                arm-none-eabi-)
+if(NOT DEFINED TOOLCHAIN_PREFIX)
+    set(TOOLCHAIN_PREFIX arm-none-eabi-)
+endif()
 
 set(CMAKE_C_COMPILER                ${TOOLCHAIN_PREFIX}gcc)
 set(CMAKE_ASM_COMPILER              ${CMAKE_C_COMPILER})
