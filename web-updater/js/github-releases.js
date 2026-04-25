@@ -24,7 +24,7 @@ const GITHUB_API = 'https://api.github.com';
  * corsfix.com is a free CORS proxy that works from GitHub Pages.
  * Format: CORS_PROXY + url  (raw URL appended directly, no encoding needed).
  */
-const CORS_PROXY = 'https://corsfix.com/';
+const CORS_PROXY = 'https://proxy.corsfix.com/?';
 
 /** Hostnames whose fetch responses are blocked by CORS policy. */
 const CORS_BLOCKED_HOSTS = new Set([
