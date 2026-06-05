@@ -14,6 +14,8 @@ check_env:
 setup:
 	@if [ -f /etc/arch-release ]; then \
 		./setup_arch.sh; \
+	elif [[ $(shell uname -s) == Darwin ]]; then \
+		./setup_macos.sh; \
 	else \
 		echo "Manual setup required: Ensure cmake, ninja, and arm-none-eabi-gcc are installed."; \
 	fi

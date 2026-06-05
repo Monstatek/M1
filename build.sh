@@ -14,7 +14,7 @@ cmake -G Ninja -B $BUILD_DIR \
     -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 
 echo "Compiling..."
-cmake --build $BUILD_DIR --parallel $(nproc)
+cmake --build $BUILD_DIR --parallel $(nproc 2>/dev/null || sysctl -n hw.ncpu)
 
 echo "Collecting artifacts to ./$OUTPUT_DIR"
 cp $BUILD_DIR/*.bin $BUILD_DIR/*.elf $BUILD_DIR/*.hex $OUTPUT_DIR/ 2>/dev/null || true

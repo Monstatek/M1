@@ -8,6 +8,10 @@ The M1 firmware can be built with STM32CubeIDE or Visual Studio Code.
 
 Clone the repository. Install the required software and extensions:
 
+- For macOS users:
+  - [Install brew](https://brew.sh/)
+  - Install prereqs: `make setup`
+
 * For STM32CubeIDE users:
 
 - The code has been built with STM32CubeIDE 1.17.0.
@@ -53,7 +57,7 @@ ninja --version
 
 ## Build
 
-* For Linux users:
+* For macOS and Linux users:
 ```bash
 make
 ```
@@ -68,7 +72,7 @@ Build in the IDE.
 
 ## Build directories
 
-* For Linux users:
+* For macOS and Linux users:
 Firmware is built in the folder `./build/` with output copied to `./artifacts/`.
 
 * For Visual Studio Code users:

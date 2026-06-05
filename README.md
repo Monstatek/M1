@@ -39,18 +39,19 @@ See [HARDWARE.md](HARDWARE.md) for more details.
 
 - **STM32CubeIDE 1.17+** (recommended), or  
 - **VS Code** with ARM GCC 14.2, CMake Tools, Cortex-Debug, and Ninja, or
-- **Linux** with ARM GCC toolchain and Ninja
+- **Linux** with ARM GCC toolchain and Ninja or
+- **MacOS** with ARM GCC toolchain, CMake Tools, and Ninja
 
 ### Build steps
 
-**Linux:**  
+#### Linux
 ```bash
 make
 ```
 
 Output: `./artifacts/` (MonstaTek_M1_v0800.elf, .bin, .hex)
 
-**STM32CubeIDE:**  
+#### #STM32CubeIDE
 Open the project and build in the IDE.
 
 **VS Code:**  
@@ -58,6 +59,18 @@ Open the project and build in the IDE.
 2. Build via the Build icon  
 
 Output: `./out/build/gcc-14_2_build-release` (VS Code) or `./Release` (STM32CubeIDE)
+
+#### MacOS
+Get prerequisites
+```bash
+make setup
+```
+Build
+```bash
+make
+```
+
+Output: `./artifacts/`
 
 ## Contributing
 
