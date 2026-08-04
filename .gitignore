@@ -55,3 +55,6 @@ compile_commands.json
 build/
 /.cache
 /artifacts
+
+# Local private security-review material
+/review-private/
