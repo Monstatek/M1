@@ -13,6 +13,8 @@
 /*************************** I N C L U D E S **********************************/
 
 #include <stdint.h>
+#include <errno.h>
+#include <limits.h>
 #include <string.h>
 #include <stdlib.h>
 #include "stm32h5xx_hal.h"
@@ -131,36 +133,151 @@ uint8_t m1_parse_spi_at_resp(char *resp, const char *resp_key, ctrl_cmd_t *app_r
 				break;
 
 			case CTRL_RESP_GET_BLE_SCAN_LIST:
+			{
+				wifi_scanlist_t *new_out_list;
+				char *address_end;
+				char *rssi_end;
+				char *payload_end;
+				char *address_type_delimiter;
+				char *address_type_end;
+				size_t next_count;
+				long parsed_rssi;
+				long parsed_address_type;
+
 				//+BLESCAN:"7c:0a:3f:9b:d5:cd",-81,1bff750042040180667c0a3f9bd5cd7e0a3f9bd5cc01000000000000,,0,3
 				ap_count = app_resp->u.wifi_ap_scan.count;
 				out_list = app_resp->u.wifi_ap_scan.out_list;
+
 				while ( true )
 				{
 					start_index = strstr(index, "\"");
 					if ( !start_index )
 						break;
-					end_index = strstr(index, "\r\n");
-					if ( !end_index )
-						break;
-					next_index = end_index;
-					out_list = realloc(out_list, sizeof(wifi_scanlist_t)*(app_resp->u.wifi_ap_scan.count + 1));
-					if ( out_list==NULL )
-						break;
-					end_index = strstr(&start_index[1], "\"");
-					cp_len = end_index - start_index - 1;
-					strncpy(out_list[app_resp->u.wifi_ap_scan.count].bssid, &start_index[1], cp_len);
-					out_list[app_resp->u.wifi_ap_scan.count].bssid[cp_len] = 0x00; // Add end of string
-					out_list[app_resp->u.wifi_ap_scan.count].rssi = strtol(&end_index[2], &start_index, 10);
-					end_index = strstr(&start_index[1], ",");
-					end_index = strstr(&end_index[1], ",");
-					out_list[app_resp->u.wifi_ap_scan.count].encryption_mode = strtol(&end_index[1], &start_index, 10);
 
-					app_resp->u.wifi_ap_scan.count++; // Increase count
-					index = strstr(next_index, resp_key); // Try to get another record
-					if (!index)
+					next_index = strstr(index, "\r\n");
+					if ( !next_index || start_index >= next_index )
 						break;
-				} // while ( true )
+
+					address_end = strstr(&start_index[1], "\"");
+					if ( !address_end || address_end >= next_index )
+						break;
+
+					cp_len =
+							(size_t)(address_end - start_index - 1);
+
+					if ( cp_len >= sizeof(out_list[0].bssid) )
+						break;
+
+					if ( address_end[1] != ',' )
+						break;
+
+					errno = 0;
+					parsed_rssi = strtol(
+							&address_end[2],
+							&rssi_end,
+							10
+					);
+
+					if ( errno == ERANGE ||
+							rssi_end == &address_end[2] ||
+							rssi_end >= next_index ||
+							*rssi_end != ',' ||
+							parsed_rssi < INT_MIN ||
+							parsed_rssi > INT_MAX )
+						break;
+
+					payload_end = strstr(&rssi_end[1], ",");
+					if ( !payload_end || payload_end >= next_index )
+						break;
+
+					address_type_delimiter =
+							strstr(&payload_end[1], ",");
+
+					if ( !address_type_delimiter ||
+							address_type_delimiter >= next_index )
+						break;
+
+					errno = 0;
+					parsed_address_type = strtol(
+							&address_type_delimiter[1],
+							&address_type_end,
+							10
+					);
+
+					if ( errno == ERANGE ||
+							address_type_end ==
+								&address_type_delimiter[1] ||
+							address_type_end >= next_index ||
+							*address_type_end != ',' ||
+							parsed_address_type < INT_MIN ||
+							parsed_address_type > INT_MAX )
+						break;
+
+					if ( app_resp->u.wifi_ap_scan.count < 0 )
+						break;
+
+					next_count =
+							(size_t)app_resp->u.wifi_ap_scan.count +
+							1U;
+
+					if ( next_count >
+							((size_t)-1) / sizeof(*out_list) )
+						break;
+
+					new_out_list = realloc(
+							out_list,
+							sizeof(*out_list) * next_count
+					);
+
+					if ( new_out_list==NULL )
+						break;
+
+					out_list = new_out_list;
+					app_resp->u.wifi_ap_scan.out_list =
+							out_list;
+
+					memset(
+							&out_list[
+								app_resp->u.wifi_ap_scan.count
+							],
+							0,
+							sizeof(
+								out_list[
+									app_resp->u.wifi_ap_scan.count
+								]
+							)
+					);
+
+					memcpy(
+							out_list[
+								app_resp->u.wifi_ap_scan.count
+							].bssid,
+							&start_index[1],
+							cp_len
+					);
+
+					out_list[
+						app_resp->u.wifi_ap_scan.count
+					].bssid[cp_len] = 0x00;
+
+					out_list[
+						app_resp->u.wifi_ap_scan.count
+					].rssi = (int)parsed_rssi;
+
+					out_list[
+						app_resp->u.wifi_ap_scan.count
+					].encryption_mode =
+							(int)parsed_address_type;
+
+					app_resp->u.wifi_ap_scan.count++;
+
+					index = strstr(next_index, resp_key);
+					if ( !index )
+						break;
+				}
+
 				break;
+			}
 
 			default:
 				break;
