@@ -635,7 +635,7 @@ void m1_logdb_printf(S_M1_LogDebugLevel_t level, const char* tag, const char* fo
 static void m1_logdb_dyn_vsprintf(const char *format, va_list pargs, char **pstring)
 {
 	int ret_n;
-	uint8_t mem_size;
+	int mem_size;
 	va_list pargsc;
 
 	mem_size = M1_LOGDB_MESSAGE_SIZE; // Set the default size first
