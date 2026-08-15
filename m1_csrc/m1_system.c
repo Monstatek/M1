@@ -698,6 +698,7 @@ void startup_config_handler(void)
 				} while (0);
 			} // if ( !m1_device_stat.dev_reset_by_wdt )
 			m1_led_fw_update_off();
+			startup_config_write(BK_REGS_SELECT_DEV_OP_STAT, DEV_OP_STATUS_NO_OP);
 		} // else if ( m1_device_stat.bu_regs.device_op_status==DEV_OP_STATUS_REBOOT )
 	} // else
 

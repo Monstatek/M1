@@ -429,7 +429,6 @@ static int power_reboot_kp_handler(void)
 		//Set registers in RTC, if any
 		//Close SD card, if any; // Do other things for this task, if needed
 		vTaskDelay(pdMS_TO_TICKS(DELAY_BEFORE_POWER_REBOOT)); // Without this delay, the reboot won't work properly!
-		m1_pre_power_down();
 		//vTaskEndScheduler();
 		NVIC_SystemReset();
 	} // else if ( this_button_status.event[BUTTON_RIGHT_KP_ID]==BUTTON_EVENT_CLICK )
