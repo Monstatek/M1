@@ -13,10 +13,10 @@
 #ifndef M1_STORAGE_H_
 #define M1_STORAGE_H_
 
-#define ESP_FILE_NAME_LEN_MAX	32
+#define ESP_FILE_NAME_LEN_MAX	256
 #define ESP_FILE_PATH_LEN_MAX	64
 
-#define FW_FILE_NAME_LEN_MAX	32
+#define FW_FILE_NAME_LEN_MAX	256
 #define FW_FILE_PATH_LEN_MAX	64
 
 void menu_setting_storage_init(void);
