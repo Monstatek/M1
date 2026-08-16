@@ -359,7 +359,7 @@ S_M1_file_info *storage_browse(void)
 	S_M1_Buttons_Status this_button_status;
 	S_M1_Main_Q_t q_item;
 	S_M1_file_info *f_info;
-	uint8_t error_stat, len;
+	uint8_t error_stat;
 	BaseType_t ret;
 
 	file_info.status = FB_OK;
@@ -461,13 +461,10 @@ S_M1_file_info *storage_browse(void)
 						{
 							//m1_fb_dyn_strcat(fullpath, 2, "",  f_info->dir_name, f_info->file_name);
 							file_info.file_is_selected = true;
-							strncpy(file_info.file_name, f_info->file_name, ESP_FILE_NAME_LEN_MAX);
-							strncpy(file_info.dir_name, f_info->dir_name, ESP_FILE_PATH_LEN_MAX);
-							len = strlen(f_info->file_name);
-							if ( len >= ESP_FILE_NAME_LEN_MAX )
-							{
-								strcpy(&file_info.file_name[len-4], "...");
-							}
+							strncpy(file_info.file_name, f_info->file_name, ESP_FILE_NAME_LEN_MAX - 1);
+							file_info.file_name[ESP_FILE_NAME_LEN_MAX - 1] = '\0';
+							strncpy(file_info.dir_name, f_info->dir_name, ESP_FILE_PATH_LEN_MAX - 1);
+							file_info.dir_name[ESP_FILE_PATH_LEN_MAX - 1] = '\0';
 							menu_setting_storage_exit();
 							break; // Exit and return to the calling task (subfunc_handler_task)
 						} // if ( f_info->file_is_selected )

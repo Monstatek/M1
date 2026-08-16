@@ -953,13 +953,14 @@ void m1_fb_deinit(void)
 /*
 *	This function dynamically concatenates number of strings given by num
 *	Each string is separated by the separator symbol given in separators
-*	Return: length of the new string
+*	Return: 1 on success, 0 if the resulting string is empty
 */
 /******************************************************************************/
 uint8_t m1_fb_dyn_strcat(char *buffer, uint8_t num, const char *format, ...)
 {
 	va_list pargs;
-	uint8_t len, k;
+	size_t len;
+	uint8_t k;
 	char *tmp_buffer;
 
 	assert(num >= 1);
@@ -996,6 +997,6 @@ uint8_t m1_fb_dyn_strcat(char *buffer, uint8_t num, const char *format, ...)
 	} // while (k)
 	va_end(pargs);
 
-	return strlen(buffer);
+	return 1;
 } // uint8_t m1_fb_dyn_strcat(char *buffer, uint8_t num, const char *format, ...)
 
