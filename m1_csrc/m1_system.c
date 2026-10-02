@@ -609,6 +609,24 @@ static void lcd_saver_update(void)
 
 
 /*============================================================================*/
+/**
+ * @brief Wake the LCD backlight now and restart the inactivity timer.
+ *
+ * Used when a view representing fresh, user-relevant output is shown (e.g. the
+ * NFC/RFID successful-read info screen). Mirrors startup_info_screen_display():
+ * wake the manager-owned backlight immediately and reseat active_timestamp so
+ * the normal LCD_SAVER_PERIOD window starts from this moment. Scanning is not
+ * affected and continues to time out normally.
+ */
+/*============================================================================*/
+void m1_lcd_wake_restart_timer(void)
+{
+	fb_sleep_timer_wake();
+	m1_device_stat.active_timestamp = HAL_GetTick();
+} // void m1_lcd_wake_restart_timer(void)
+
+
+/*============================================================================*/
 /*
  * This function initializes default values for the system after power on.
  */

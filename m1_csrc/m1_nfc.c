@@ -42,6 +42,7 @@
 #if defined(M1_MFC_RAW_EMULATION)
 #include "m1_mfc_raw_listener.h"   /* raw MIFARE Classic emulation (Scope B) */
 #include "m1_feedback_orchestration.h"
+#include "m1_system.h"   /* m1_lcd_wake_restart_timer() for the successful-read info screen */
 #endif
 
 /*************************** D E F I N E S ************************************/
@@ -1678,6 +1679,10 @@ static int nfc_read_gui_message(void)
 				record_stat = NFC_RECORD_ACTIVE;
 				fb_net_read_stop(); // migrated: NFC read complete
 				fb_alert_success(FB_OWNER_RADIO);
+				/* Info screen is now shown: wake the backlight and restart the
+				 * normal 45 s inactivity timer from this moment (scanning itself
+				 * is left to time out normally). */
+				m1_lcd_wake_restart_timer();
 				/* A card recognized by the bounded card-interpretation layer
 				 * (e.g. Clipper) shows its human-readable transit result as the
 				 * IMMEDIATE first view -- never the generic ISO Card Info

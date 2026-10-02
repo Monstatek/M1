@@ -33,6 +33,7 @@
 #include "privateprofilestring.h"
 #include "m1_file_util.h"
 #include "m1_feedback_orchestration.h"
+#include "m1_system.h"   /* m1_lcd_wake_restart_timer() for the successful-read info screen */
 
 /*************************** D E F I N E S ************************************/
 
@@ -597,6 +598,10 @@ static int lfrfid_read_message(void)
 			{
 				fb_net_read_stop(); // LF-RFID valid read complete
 				fb_alert_success(FB_OWNER_RADIO);
+				/* Info screen is now shown: wake the backlight and restart the
+				 * normal 45 s inactivity timer from this moment (scanning itself
+				 * is left to time out normally). */
+				m1_lcd_wake_restart_timer();
 			}
 
 			//m1_app_send_q_message(lfrfid_q_hdl, Q_EVENT_UI_LFRFID_STOP);

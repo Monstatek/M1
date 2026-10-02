@@ -175,4 +175,10 @@ void power_on_button_check(void);
 void startup_config_write(uint8_t config_byte, uint8_t config_val);
 void startup_info_screen_display(const char *scr_text);
 
+/* Wake the LCD backlight immediately and restart the normal inactivity timer.
+ * Call when a view representing fresh, user-relevant output is shown (e.g. the
+ * NFC/RFID successful-read info screen) so the standard LCD_SAVER_PERIOD window
+ * begins from that moment. Does not affect scanning, which times out normally. */
+void m1_lcd_wake_restart_timer(void);
+
 #endif /* M1_SYSTEM_H_ */
