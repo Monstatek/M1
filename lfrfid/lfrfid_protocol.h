@@ -3,13 +3,6 @@
 /*
  * LF RFID (125 kHz) implementation
  *
- * Portions of the data structure definitions and table-driven
- * architecture were adapted from the Flipper Zero firmware project.
- *
- * Original project:
- * https://github.com/flipperdevices/flipperzero-firmware
- *
- * Copyright (C) Flipper Devices Inc.
  * Licensed under the GNU General Public License v3.0 (GPLv3).
  *
  * Modifications and additional implementation:
@@ -42,6 +35,16 @@ typedef enum {
     LFRFIDProtocolEM4100_32,
     LFRFIDProtocolEM4100_16,
     LFRFIDProtocolH10301,
+    LFRFIDProtocolPyramid,
+    LFRFIDProtocolIoProxXSF,
+    LFRFIDProtocolAWID,
+    LFRFIDProtocolRadioKey,
+    LFRFIDProtocolJablotron,
+    LFRFIDProtocolFDXB,
+    LFRFIDProtocolHIDProx,
+    LFRFIDProtocolHIDExt,
+    LFRFIDProtocolKeri,
+    LFRFIDProtocolNexwatch,
     LFRFIDProtocolMax,
 } LFRFIDProtocol;
 
@@ -99,6 +102,7 @@ typedef struct {
 extern const LFRFIDProtocolBase* lfrfid_protocols[];
 
 void lfrfid_decoder_begin(void);
+void lfrfid_decoder_reset(uint16_t protocol_index);
 bool lfrfid_decoder_execute(uint16_t protocol_index, const lfrfid_evt_t* new_stream, uint8_t stream_count);
 
 bool lfrfid_encoder_begin(uint16_t protocol_index, void* proto);

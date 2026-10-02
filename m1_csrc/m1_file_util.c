@@ -164,8 +164,8 @@ const char* fu_get_filename(const char *path)
  * @brief Extracts only the directory path from a full file path.
  *
  * Example:
- *   Input:  "0://RFID/12345678.rfid"
- *   Output: "0://RFID"
+ *   Input:  "0://rfid/12345678.rfid"
+ *   Output: "0://rfid"
  *
  * If no separator is found, the result becomes an empty string.
  *
@@ -228,16 +228,23 @@ void fu_get_directory_path(const char *fullPath, char *outDir, size_t dirSize)
  * @endcode
  */
 /*============================================================================*/
-int fs_file_exists(const char *path)
+FRESULT fs_path_kind(const char *path, fs_path_kind_t *kind)
 {
+    if (!kind) return FR_INVALID_PARAMETER;
+    *kind = FS_PATH_NONE;
+    if (!path) return FR_INVALID_PARAMETER;
     FILINFO fno;
     FRESULT fr = f_stat(path, &fno);
-
     if (fr == FR_OK)
-    {
-        return ((fno.fattrib & AM_DIR) == 0) ? 1 : -1;
-    }
-    return 0;
+        *kind = (fno.fattrib & AM_DIR) ? FS_PATH_DIRECTORY : FS_PATH_FILE;
+    return fr;
+}
+
+int fs_file_exists(const char *path)
+{
+    fs_path_kind_t kind;
+    if (fs_path_kind(path, &kind) != FR_OK) return 0;
+    return kind == FS_PATH_FILE ? 1 : -1;
 }
 
 
@@ -262,13 +269,9 @@ int fs_file_exists(const char *path)
 /*============================================================================*/
 int fs_directory_exists(const char *path)
 {
-    FILINFO fno;
-    FRESULT fr = f_stat(path, &fno);
-
-    if (fr == FR_OK) {
-        return (fno.fattrib & AM_DIR) ? 1 : -1;
-    }
-    return 0;
+    fs_path_kind_t kind;
+    if (fs_path_kind(path, &kind) != FR_OK) return 0;
+    return kind == FS_PATH_DIRECTORY ? 1 : -1;
 }
 
 
@@ -481,4 +484,3 @@ void fu_path_combine(char *out, size_t outSize, const char *path, const char *fi
 
     strncat(out, fname, outSize - strlen(out) - 1);
 }
-

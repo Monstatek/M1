@@ -52,12 +52,8 @@ FW_CFG_SECTION S_M1_FW_CONFIG_t m1_fw_config = {
 uint8_t bl_crc_check(uint32_t image_size);
 uint32_t bl_get_crc_chunk(uint32_t *data_scr, uint32_t len, bool crc_init, bool last_chunk);
 void bl_swap_banks(void);
-static uint8_t bl_get_protection_status(void);
-static uint8_t bl_set_protection_status(uint32_t protection);
 static uint16_t bl_flash_if_init(void);
 static uint16_t bl_flash_if_deinit(void);
-static uint16_t bl_flash_if_erase(uint32_t add);
-static uint32_t bl_get_sector(uint32_t address);
 static uint8_t bl_flash_start(uint32_t image_size);
 void fw_gui_progress_update(size_t remainder);
 /*************** F U N C T I O N   I M P L E M E N T A T I O N ****************/
@@ -223,49 +219,6 @@ static uint16_t bl_flash_if_deinit(void)
 
 
 
-/*============================================================================*/
-/**
-  * @brief  Erases sector.
-  * @param  Add: Address of sector to be erased.
-  * @retval 0 if operation is successeful, MAL_FAIL else.
-  */
-/*============================================================================*/
-static uint16_t bl_flash_if_erase(uint32_t add)
-{
-	//uint32_t startsector = 0;
-	uint32_t sectornb = 0;
-	/* Variable contains Flash operation status */
-	HAL_StatusTypeDef status;
-	FLASH_EraseInitTypeDef EraseInitStruct;
-
-	EraseInitStruct.TypeErase = FLASH_TYPEERASE_SECTORS;
-
-	// we want to erase the other bank than the active one
-	if (bl_get_active_bank()==BANK1_ACTIVE)
-	{
-		M1_LOG_I(M1_LOGDB_TAG, "Erase Sector in Bank 2\r\n");
-		EraseInitStruct.Banks = FLASH_BANK_2;
-	}
-	else
-	{
-		M1_LOG_I(M1_LOGDB_TAG, "Erase Sector in Bank 1\r\n");
-		EraseInitStruct.Banks = FLASH_BANK_1;
-	}
-
-	EraseInitStruct.Sector = bl_get_sector(add);
-	EraseInitStruct.NbSectors = 1;
-
-	m1_wdt_reset();
-
-	status = HAL_FLASHEx_Erase(&EraseInitStruct, &sectornb);
-
-	if (status != HAL_OK)
-	{
-		return 1;
-	}
-
-	return 0;
-} // static uint16_t bl_flash_if_erase(uint32_t add)
 
 
 
@@ -314,98 +267,12 @@ uint8_t bl_flash_if_write(uint8_t *src, uint8_t *dest, uint32_t len)
 
 
 
-/*============================================================================*/
-/**
-  * @brief  Gets the sector of a given address
-  * @param  address address of the FLASH Memory
-  * @retval The sector of a given address
-  */
-/*============================================================================*/
-static uint32_t bl_get_sector(uint32_t address)
-{
-	uint32_t sector = 0;
-
-	if (address < (FLASH_BASE + FLASH_BANK_SIZE))
-	{
-		sector = (address - FLASH_BASE) / FLASH_SECTOR_SIZE;
-	}
-	else
-	{
-		sector = (address - (FLASH_BASE + FLASH_BANK_SIZE)) / FLASH_SECTOR_SIZE;
-	}
-
-	return sector;
-} // static uint32_t bl_get_sector(uint32_t address)
 
 
 
-/*============================================================================*/
-/**
-  * @brief  Get protection status
-  * @param
-  * @retval The protection status
-  */
-/*============================================================================*/
-static uint8_t bl_get_protection_status(void)
-{
-    FLASH_OBProgramInitTypeDef OBStruct = {0};
-    uint8_t protection                  = BL_PROTECTION_NONE;
-
-    HAL_FLASH_Unlock();
-
-    /* Bank 1 */
-    OBStruct.Banks = FLASH_BANK_1;
-    HAL_FLASHEx_OBGetConfig(&OBStruct);
-
-    /* Bank 2 */
-    OBStruct.Banks = FLASH_BANK_2;
-    HAL_FLASHEx_OBGetConfig(&OBStruct);
-
-    // Add more code here
-
-    HAL_FLASH_Lock();
-
-    return protection;
-} // static uint8_t bl_get_protection_status(void)
 
 
 
-/*============================================================================*/
-/**
-  * @brief  Set protection status
-  * @param
-  * @retval BL_CODE_OK if success
-  */
-/*============================================================================*/
-static uint8_t bl_set_protection_status(uint32_t protection)
-{
-    FLASH_OBProgramInitTypeDef OBStruct = {0};
-    HAL_StatusTypeDef status            = HAL_ERROR;
-
-    status = HAL_FLASH_Unlock();
-    status |= HAL_FLASH_OB_Unlock();
-
-    /* Bank 1 */
-    OBStruct.Banks = FLASH_BANK_1;
-    OBStruct.OptionType = OPTIONBYTE_WRP;
-
-    /* Bank 2 */
-    OBStruct.Banks = FLASH_BANK_2;
-    OBStruct.OptionType = OPTIONBYTE_WRP;
-
-    // Add more code here
-
-    if(status == HAL_OK)
-    {
-        /* Loading Flash Option Bytes - this generates a system reset. */
-        status |= HAL_FLASH_OB_Launch();
-    }
-
-    status |= HAL_FLASH_OB_Lock();
-    status |= HAL_FLASH_Lock();
-
-    return (status == HAL_OK) ? BL_CODE_OK : BL_CODE_OBP_ERROR;
-} // static uint8_t bl_set_protection_status(uint32_t protection)
 
 
 
@@ -528,41 +395,67 @@ static uint8_t bl_flash_start(uint32_t image_size)
   * @retval None
   */
 /******************************************************************************/
+/* File-scope (was: function-local `static`) so bl_flash_stream_reset() can
+ * force them back to their pre-BEGIN state -- see that function's own doc
+ * comment in m1_fw_update_bl.h for why that matters. */
+static uint32_t s_bl_write_acc;
+static uint8_t *s_bl_flash_add;
+static bool     s_bl_init_done = false;
+
+void bl_flash_stream_reset(void)
+{
+    s_bl_init_done = false;
+    s_bl_write_acc = 0;
+    s_bl_flash_add = NULL;
+}
+
 static uint8_t bl_flash_binary(uint8_t *payload, size_t size)
 {
     uint8_t err;
-    static uint32_t write_acc;
-    static uint8_t *flash_add;
-    static bool init_done = false;
 
-    if ( !init_done )
+    if ( !s_bl_init_done )
     {
         M1_LOG_I(M1_LOGDB_TAG, "Start flashing...\r\n");
-        flash_add = (uint8_t *)FW_START_ADDRESS;
-        flash_add += M1_FLASH_BANK_SIZE; // It should always write to Bank 2 destination
-        write_acc = 0;
-        init_done = true;
-    } // if ( !init_done )
+        s_bl_flash_add = (uint8_t *)FW_START_ADDRESS;
+        s_bl_flash_add += M1_FLASH_BANK_SIZE; // It should always write to Bank 2 destination
+        s_bl_write_acc = 0;
+        s_bl_init_done = true;
+    } // if ( !s_bl_init_done )
 
     if ( size )
     {
-        err = bl_flash_if_write(payload, flash_add, size);
+        err = bl_flash_if_write(payload, s_bl_flash_add, size);
         if (err != BL_CODE_OK)
         {
-            M1_LOG_I(M1_LOGDB_TAG, "Writing flash error at 0x%X.\r\n", flash_add);
+            M1_LOG_I(M1_LOGDB_TAG, "Writing flash error at 0x%X.\r\n", s_bl_flash_add);
             return err;
         }
-        write_acc += size;
-        flash_add += size;
+        s_bl_write_acc += size;
+        s_bl_flash_add += size;
         return BL_CODE_OK;
     } // if ( size )
 
     M1_LOG_I(M1_LOGDB_TAG, "\r\nFlashing completed!\r\n");
-    init_done = false; // reset
+    s_bl_init_done = false; // reset
 
-    write_acc -= FW_IMAGE_CRC_SIZE; // exclude the CRC at the end of the image file
-    write_acc /= 4; // convert image size from byte to word (32-bit)
-    err = bl_crc_check(write_acc);
+    /* An image smaller than its own trailing CRC can't be valid -- reject it
+     * here rather than letting the subtraction below underflow s_bl_write_acc
+     * (uint32_t) into a huge word count, which bl_crc_check() would then hand
+     * straight to HAL_CRC_Calculate() as a read length far past the flash
+     * bank (memory fault / garbage compared against whatever 4 bytes happen
+     * to sit at FW_CRC_ADDRESS). Streamed callers can reach this with a tiny
+     * client-declared image_size (the M1CP coordinator only rejects
+     * image_size == 0, not 1..FW_IMAGE_CRC_SIZE-1). */
+    if ( s_bl_write_acc < FW_IMAGE_CRC_SIZE )
+    {
+        M1_LOG_I(M1_LOGDB_TAG, "Image too small to contain its own CRC (%lu bytes).\r\n",
+                 (unsigned long)s_bl_write_acc);
+        return BL_CODE_SIZE_ERROR;
+    }
+
+    s_bl_write_acc -= FW_IMAGE_CRC_SIZE; // exclude the CRC at the end of the image file
+    s_bl_write_acc /= 4; // convert image size from byte to word (32-bit)
+    err = bl_crc_check(s_bl_write_acc);
 
 	if (err != BL_CODE_OK)
     {
@@ -645,6 +538,56 @@ uint8_t bl_flash_app(FIL *hfile)
 
 /******************************************************************************/
 /**
+  * @brief  Streamed programming wrappers for the M1CP firmware-update path.
+  *         These reuse the exact SD-path engine (same calls, same order) but are
+  *         driven by streamed chunks instead of a FatFs file, so no on-device SD
+  *         staging is needed. Engine logic is unchanged.
+  * @retval BL_CODE_OK on success, else an S_M1_BL_CODES_t error.
+  */
+/******************************************************************************/
+uint8_t bl_flash_stream_begin(uint32_t image_size)
+{
+	/* Force the write cursor back to its pre-BEGIN state FIRST, in case the
+	 * previous attempt (if any) was aborted or failed before its own
+	 * bl_flash_binary(NULL,0) finalize call ran -- otherwise this BEGIN's
+	 * fresh erase would be written into starting from that stale,
+	 * mid-previous-image cursor instead of the start of the bank. See
+	 * bl_flash_stream_reset()'s own doc comment (m1_fw_update_bl.h). */
+	bl_flash_stream_reset();
+	bl_flash_if_init();
+	return bl_flash_start(image_size);   // erase the inactive bank
+} // uint8_t bl_flash_stream_begin(uint32_t image_size)
+
+uint8_t bl_flash_stream_write(uint8_t *payload, uint32_t size)
+{
+	return bl_flash_binary(payload, (size_t)size);   // program one chunk
+} // uint8_t bl_flash_stream_write(uint8_t *payload, uint32_t size)
+
+uint8_t bl_flash_stream_finish(void)
+{
+	uint8_t err = bl_flash_binary(NULL, 0);   // finalize + bl_crc_check
+	bl_flash_if_deinit();
+	return err;
+} // uint8_t bl_flash_stream_finish(void)
+
+void bl_flash_stream_abort(void)
+{
+	// Release/reset for every exit path that ISN'T a successful
+	// bl_flash_stream_finish() (which already re-locks flash itself, above).
+	// bl_flash_if_init/deinit are file-local (HAL_FLASH_Unlock/Lock); this is
+	// the one exported way a caller outside this file can make sure flash
+	// ends up locked again after a begin() that was aborted or that never
+	// reached finish(). Safe to call even when nothing was ever unlocked
+	// this attempt: bl_flash_stream_reset() is a pure state reset and
+	// HAL_FLASH_Lock() is idempotent on already-locked flash.
+	bl_flash_stream_reset();
+	bl_flash_if_deinit();
+} // void bl_flash_stream_abort(void)
+
+
+
+/******************************************************************************/
+/**
   * @brief
   * @param None
   * @retval None
@@ -665,11 +608,11 @@ void fw_gui_progress_update(size_t remainder)
 		progress_percent_count = 0;
 		u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_BG); // set to background color
 		// Draw solid box to clear existing content
-		u8g2_DrawBox(&m1_u8g2, 4, INFO_BOX_Y_POS_ROW_1 - M1_SUB_MENU_FONT_HEIGHT + 1, 120, M1_SUB_MENU_FONT_HEIGHT);
+		u8g2_DrawBox(&m1_u8g2, 4, INFO_BOX_Y_POS_ROW_1 - M1_SUB_MENU_FONT_HEIGHT + 1, 120, M1_SUB_MENU_FONT_HEIGHT + 1);
 		u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_TXT); // return to text color
 		u8g2_DrawXBMP(&m1_u8g2, FW_UPDATE_PROGRESS_SLIDE_STRIP_COL, FW_UPDATE_PROGRESS_SLIDE_STRIP_ROW,
 					126, 14, fw_update_slide_strip_126x14); // Progress slide strip
-		u8g2_DrawStr(&m1_u8g2, 4, INFO_BOX_Y_POS_ROW_1, "Update progress: 00 %");
+		u8g2_DrawStr(&m1_u8g2, 4, INFO_BOX_Y_POS_ROW_1, "Updating: 00%");
 		progress_slider_x_post = 3;
 		M1_LOG_N(M1_LOGDB_TAG, "\r\n");
 	}
@@ -683,10 +626,10 @@ void fw_gui_progress_update(size_t remainder)
 		{
 			progress_percent_count++;
 			percent = FW_UPDATE_FULL_PROGRESS_FACTOR*progress_percent_count;
-			sprintf(percent_txt, "Update progress: %02d %%", percent);
+			sprintf(percent_txt, "Updating: %02d%%", percent);
 			u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_BG); // set to background color
 			// Draw solid box to clear existing content
-			u8g2_DrawBox(&m1_u8g2, 4, INFO_BOX_Y_POS_ROW_1 - M1_SUB_MENU_FONT_HEIGHT + 1, 120, M1_SUB_MENU_FONT_HEIGHT);
+			u8g2_DrawBox(&m1_u8g2, 4, INFO_BOX_Y_POS_ROW_1 - M1_SUB_MENU_FONT_HEIGHT + 1, 120, M1_SUB_MENU_FONT_HEIGHT + 1);
 			u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_TXT); // return to text color
 			u8g2_DrawStr(&m1_u8g2, 4, INFO_BOX_Y_POS_ROW_1, percent_txt); // Write new content
 			u8g2_DrawXBMP(&m1_u8g2, progress_slider_x_post, FW_UPDATE_PROGRESS_SLIDE_STRIP_ROW + 3,

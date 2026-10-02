@@ -62,7 +62,10 @@ void m1_system_init(void)
 
 	m1_system_GPIO_init();
 
-	ret = xTaskCreate(m1_system_init_task, "m1_system_init_task_n", M1_TASK_STACK_SIZE_DEFAULT, NULL, TASK_PRIORITY_SYS_INIT, &sys_init_task_hdl);
+	/* SD mount performs canonical-folder provisioning before the remaining
+	 * application tasks start. FatFs LFN operations use substantial stack, so
+	 * the initialization task needs the existing 1024-word allocation. */
+	ret = xTaskCreate(m1_system_init_task, "m1_system_init_task_n", M1_TASK_STACK_SIZE_1024, NULL, TASK_PRIORITY_SYS_INIT, &sys_init_task_hdl);
 	assert(ret==pdPASS);
 	assert(sys_init_task_hdl!=NULL);
 	free_heap = xPortGetFreeHeapSize();
@@ -170,21 +173,19 @@ void m1_system_init_task(void *param)
 			//  MX_X_CUBE_NFC6_Init();
 			m1_i2c_hal_init(&hi2c1);
 			m1_spi_hal_init(&hspi2);
-
 			lp5814_init();
 			m1_lcd_init(&hspi1);
 
-			power_on_button_check();
 			m1_sdcard_init(&hsd1);
 			//m1_esp32_init();
-
+#if defined M1_DEBUG_CLI_ENABLE
 			/* USART1 default config */
 			huart_logdb.Init.BaudRate = LOG_DEBUG_UART_BAUD;
 			huart_logdb.Init.WordLength = UART_WORDLENGTH_8B;
 			huart_logdb.Init.StopBits = UART_STOPBITS_1;
 			huart_logdb.Init.Parity = UART_PARITY_NONE;
 			m1_logdb_init();
-
+#endif // #if defined M1_DEBUG_CLI_ENABLE
 			battery_service_init();
 			m1_wdt_init();
 			m1_tasks_init();
@@ -198,4 +199,3 @@ void m1_system_init_task(void *param)
 		}
 	} // while (1)
 } // void m1_system_init_task(void *param)
-

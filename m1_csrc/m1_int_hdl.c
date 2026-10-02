@@ -8,6 +8,9 @@
  * M1 Project
  */
 /*************************** I N C L U D E S **********************************/
+#pragma GCC push_options
+#pragma GCC optimize("O0")
+
 
 #include <m1_sub_ghz_decenc.h>
 #include <stdint.h>
@@ -25,6 +28,7 @@
 //#include "spi_drv.h"
 #include "spi_master.h"
 #include "m1_rfid.h"
+#include "m1_isr_drop_counters.h"
 #include "lfrfid.h"
 
 /*************************** D E F I N E S ************************************/
@@ -129,7 +133,6 @@ void EXTI15_IRQHandler(void)
 /**
   *
   * @brief EXTI line detection callback, used as SPI handshake GPIO
-  * /*
   * This function is called when the handshake line goes high.
   * There are two ways to trigger the GPIO interrupt:
   * 1. Master sends data, slave has received successfully
@@ -230,6 +233,27 @@ void TIM16_IRQHandler(void)
 
 
 
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart) {
+    if (huart->Instance == huart_logdb.Instance) {
+        uint32_t err = HAL_UART_GetError(huart);
+        if (err & HAL_UART_ERROR_ORE) {
+            __HAL_UART_CLEAR_FLAG(huart, UART_CLEAR_OREF); // Overrun flag
+        }
+
+		// Keep RX recovery aligned with the current CDC mode.
+		if (m1_usbcdc_mode == CDC_MODE_LOG_CLI)
+		{
+			HAL_UART_Receive_IT(huart, logdb_rx_buffer, 1);
+		}
+		else
+		{
+			HAL_UARTEx_ReceiveToIdle_DMA(huart, logdb_rx_buffer, M1_LOGDB_RX_BUFFER_SIZE);
+		}
+    }
+}
+
+
+
 /******************************************************************************/
 /*
  * USART1 Interrupt handler
@@ -241,17 +265,18 @@ void USART1_IRQHandler(void)
 
 	if (m1_usbcdc_mode == CDC_MODE_VCP)
 	{
-		/* USART1 rx and USB CDC tx */
-		HAL_UART_IRQHandler(&huart_logdb);
-
-		// IDLE interrupt
-		if (huart_logdb.Instance->ISR & UART_FLAG_IDLE)
+		// Handle IDLE before HAL handler to avoid losing the final RX tail.
+		if ((__HAL_UART_GET_FLAG(&huart_logdb, UART_FLAG_IDLE) != RESET) &&
+		    (__HAL_UART_GET_IT_SOURCE(&huart_logdb, UART_IT_IDLE) != RESET))
 		{
 			__HAL_UART_CLEAR_IDLEFLAG(&huart_logdb); // Clear IDLE flag
 
 			usart_rxupdate_head_pointer();
 			usart_rxdata_process_from_isr();
 		}
+
+		/* USART1 rx and USB CDC tx */
+		HAL_UART_IRQHandler(&huart_logdb);
 	}
 	else
 	{
@@ -281,7 +306,7 @@ void USART1_IRQHandler(void)
 
 /******************************************************************************/
 /*
- * @brief Tx Transfer completed callback.
+ * @brief UART Tx Transfer completed callback.
  * @param huart UART handle.
  * @retval None
  */
@@ -291,35 +316,36 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
   // Call after TX GPDMA transmission is complete
   BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 
-  if(huart->Instance == USART1)
+  if((huart->Instance == USART1) || (huart->Instance == UART4))
   {
-    //huart->gState = HAL_UART_STATE_READY; // State explicit reset
-
-#if 1
-    tx_cptl_usart1 = 0;
-#else
-    if (usb2ser_tx_semaphore != NULL) {
-      // Release xUsartTxSemaphore to wake up UsartTxTask
-      xSemaphoreGiveFromISR(usb2ser_tx_semaphore, &xHigherPriorityTaskWoken);
-    }
-#endif
+    tx_cptl_usartx = 0;
     portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
   }
 }
 
 
+
+int DEBUG_m1_gpdma1ch2 = 0;
+
 /******************************************************************************/
 /*
- * @brief This function handles GPDMA1 Channel 0 global interrupt.
- *        USART1 - RX
+ * @brief This function handles GPDMA1 Channel 2 global interrupt.
+ *        USARTx - RX
  */
 /******************************************************************************/
 void GPDMA1_Channel2_IRQHandler(void)
 {
-  HAL_DMA_IRQHandler(&hdma_rxlogdb);
+    DEBUG_m1_gpdma1ch2++;
 
-  usart_rxupdate_head_pointer();
-  usart_rxdata_process_from_isr();
+    HAL_DMA_IRQHandler(&hdma_rxlogdb);
+
+	if ((m1_usbcdc_mode != CDC_MODE_VCP) && (m1_usbcdc_mode != CDC_MODE_ESP32))
+	{
+		return;
+	}
+
+    usart_rxupdate_head_pointer();
+    usart_rxdata_process_from_isr();
 }
 
 
@@ -368,10 +394,10 @@ void GPDMA1_Channel1_IRQHandler(void)
 	QueueHandle_t q_item;
 	portBASE_TYPE xHigherPriorityTaskWoken = pdFALSE;
     /* Transfer Complete Interrupt */
-    if ( (__HAL_DMA_GET_FLAG(&hdma_logdb, DMA_FLAG_TC) != 0U) )
+    if ( (__HAL_DMA_GET_FLAG(&hdma_txlogdb, DMA_FLAG_TC) != 0U) )
     {
     	/* Check if interrupt source is enabled */
-    	if ( __HAL_DMA_GET_IT_SOURCE(&hdma_logdb, DMA_IT_TC) != 0U )
+    	if ( __HAL_DMA_GET_IT_SOURCE(&hdma_txlogdb, DMA_IT_TC) != 0U )
     	{
     		m1_logdb_update_tx_buffer(); // Update ring buffer counter
     		if ( !m1_logdb_check_empty_state() ) // There's still data to send?
@@ -379,10 +405,10 @@ void GPDMA1_Channel1_IRQHandler(void)
     			xQueueSendFromISR(log_q_hdl, &q_item, &xHigherPriorityTaskWoken);
     			portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
     		} // if ( !m1_logdb_check_empty_state() )
-    	} // if ( __HAL_DMA_GET_IT_SOURCE(&hdma_logdb, DMA_IT_TC) != 0U )
-    } // if ( (__HAL_DMA_GET_FLAG(&hdma_logdb, DMA_FLAG_TC) != 0U) )
+    	} // if ( __HAL_DMA_GET_IT_SOURCE(&hdma_txlogdb, DMA_IT_TC) != 0U )
+    } // if ( (__HAL_DMA_GET_FLAG(&hdma_txlogdb, DMA_FLAG_TC) != 0U) )
 
-	HAL_DMA_IRQHandler(&hdma_logdb);
+	HAL_DMA_IRQHandler(&hdma_txlogdb);
 } // void GPDMA1_Channel1_IRQHandler(void)
 
 
@@ -404,7 +430,6 @@ void GPDMA1_Channel0_IRQHandler(void)
     	subghz_tx_tc_flag = 1;
     } // if ( flag )
 } // void GPDMA1_Channel1_IRQHandler(void)
-
 
 
 
@@ -438,26 +463,45 @@ void GPDMA1_Channel5_IRQHandler(void)
 
 /******************************************************************************/
 /*
- * UART4 Interrupt handler, Rx/Tx for ESP32
+ * UART4 Interrupt handler, RX for ESP32
  */
 /******************************************************************************/
 void UART4_IRQHandler(void)
 {
-    if ( __HAL_UART_GET_FLAG(&huart_esp, UART_FLAG_RXFNE) || __HAL_UART_GET_FLAG(&huart_esp, UART_FLAG_ORE) )
+    if (m1_usbcdc_mode == CDC_MODE_ESP32)
     {
-    	/* Check if interrupt source is enabled */
-    	if ( __HAL_UART_GET_IT_SOURCE(&huart_esp, UART_IT_RXFNE) != 0U )
-    	{
-    		esp32_uartrx_handler(huart_esp.Instance->RDR);
-    	}
-        // Error(s) should be cleared here before calling the default ISR
-        // ISR may disable interrupt unexpectedly if it detects error(s) in the Status Register
-    	__HAL_UART_CLEAR_FLAG(&huart_esp, UART_CLEAR_OREF);
-    } // if ( __HAL_UART_GET_FLAG(&huart_esp, UART_FLAG_RXFNE) || __HAL_UART_GET_FLAG(&huart_esp, UART_FLAG_ORE) )
+		// Handle IDLE before HAL handler to avoid losing the final RX tail.
+		if ((__HAL_UART_GET_FLAG(&huart_logdb, UART_FLAG_IDLE) != RESET) &&
+		    (__HAL_UART_GET_IT_SOURCE(&huart_logdb, UART_IT_IDLE) != RESET))
+		{
+			__HAL_UART_CLEAR_IDLEFLAG(&huart_logdb); // Clear IDLE flag
 
-    HAL_UART_IRQHandler(&huart_esp);
+			usart_rxupdate_head_pointer();
+			usart_rxdata_process_from_isr();
+		}
+
+		/* USART4 rx */
+		HAL_UART_IRQHandler(&huart_logdb);
+    }
+    else
+    {
+		if ( __HAL_UART_GET_IT_SOURCE(&huart_esp, UART_IT_RXFNE) != 0U )
+        {
+			while ( __HAL_UART_GET_FLAG(&huart_esp, UART_FLAG_RXFNE) )
+            {
+				esp32_uartrx_handler((uint8_t)huart_esp.Instance->RDR);
+            }
+		}
+
+		if ( __HAL_UART_GET_FLAG(&huart_esp, UART_FLAG_ORE) )
+		{
+            __HAL_UART_CLEAR_FLAG(&huart_esp, UART_CLEAR_OREF);
+			m1_esp32_uart_notify_ore();
+		}
+
+        HAL_UART_IRQHandler(&huart_esp);
+    }
 } // void UART4_IRQHandler(void)
-
 
 
 
@@ -509,7 +553,8 @@ void HAL_TIM_PeriodElapsedCallback_IR(TIM_HandleTypeDef *htim)
 				ir_ota_data_tx_active = FALSE;
 				q_item.q_data.ir_tx_data = 1; // any value, not used
 				q_item.q_evt_type = Q_EVENT_IRRED_TX;
-				xQueueSendFromISR(main_q_hdl, &q_item, &xHigherPriorityTaskWoken); // Send sample to queue, return: pdPASS or errQUEUE_FULL
+				if (xQueueSendFromISR(main_q_hdl, &q_item, &xHigherPriorityTaskWoken) != pdPASS)
+					m1_isr_drop_note_ir_tx();
 				portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 			}
 		} // if ( ir_ota_data_tx_active )
@@ -527,7 +572,8 @@ void HAL_TIM_PeriodElapsedCallback_IR(TIM_HandleTypeDef *htim)
 			q_item.q_evt_type = Q_EVENT_IRRED_RX;
 			q_item.q_data.ir_rx_data.ir_edge_te = cap_val;
 			q_item.q_data.ir_rx_data.ir_edge_dir = (IR_RX_GPIO_Port->IDR & IR_RX_Pin)?1:0; // edge: '1' for Rising  or '0' for falling edge
-			xQueueSendFromISR(main_q_hdl, &q_item, &xHigherPriorityTaskWoken); // Send sample to queue, return: pdPASS or errQUEUE_FULL
+			if (xQueueSendFromISR(main_q_hdl, &q_item, &xHigherPriorityTaskWoken) != pdPASS)
+				m1_isr_drop_note_ir_rx_start();
 			portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 		} // if ( irmp_start_bit_is_detected() )
 	}
@@ -593,7 +639,8 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 			q_item.q_data.ir_rx_data.ir_edge_dir = EDGE_DET_FALLING; // edge: '1' for Rising  or '0' for falling edge
 		}
 		q_item.q_evt_type = Q_EVENT_IRRED_RX;
-		xQueueSendFromISR(main_q_hdl, &q_item, &xHigherPriorityTaskWoken); // Send sample to queue, return: pdPASS or errQUEUE_FULL
+		if (xQueueSendFromISR(main_q_hdl, &q_item, &xHigherPriorityTaskWoken) != pdPASS)
+			m1_isr_drop_note_ir_rx_edge();
 		portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 	} // if (htim->Channel == IR_DECODE_TIMER_DEC_CH_ACTIV)
 } // void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
@@ -617,38 +664,47 @@ void TIM1_UP_IRQHandler(void)
 	__HAL_TIM_CLEAR_FLAG(&timerhdl_subghz_tx, TIM_FLAG_UPDATE);
 	if ( !subghz_tx_tc_flag ) // DMA not completed?
 	{
-		// The fix for the case when an IRS interrupt handler may be missed due to a short pulse (<<100us).
-		// In that case, the following bits' polarity will be inverted.
-		// Solution:
+		// In case when this IRS handler might be missed due to a short pulse (<<100us).
+		// The fix:
 		// Each time this ISR occurs, the DMA counter (CBR1) is expected to decrease by one data block.
-		// If an ISR is missed, the DMA counter will decrease more than one data block in the next ISR.
-		// If that happens, the CCR4 should be kept unchanged.
-		// Or
-		// SUBGHZ_TX_GPIO_PIN should always be HIGH at the odd data block of a DMA transfer.
-		// That means, an odd data block should be in sync with the HIGH at SUBGHZ_TX_GPIO_PIN.
-		// Otherwise, an ISR may be missed. In that case, keep the CCR4 unchanged.
-		// DMA transfer is always ahead of this ISR.
-		toggle = subghz_decenc_ctl.ntx_raw_len - hdma_subghz_tx.Instance->CBR1; // Data blocks transferred
-		toggle >>= 1; // Convert length from bytes to block
-		toggle &= 0x01; // Make odd or even data block
-		if ( SUBGHZ_TX_GPIO_PORT->IDR & SUBGHZ_TX_GPIO_PIN ) // Pin is high?
-			toggle ^= 1; // Combine the data block and the output data level
-
+		// If an ISR is missed, CBR1 will decrease more than one data block.
+		// That means, if an odd number of data block has been transferred, CCR4 should be toggled.
+		// In normal case, this odd number should always be a 1.
+		toggle = subghz_decenc_ctl.ntx_raw_len - hdma_subghz_tx.Instance->CBR1; // Data bytes transferred
+		toggle >>= 1; // Convert length from bytes to data block
+		toggle &= 0x01; // Make odd or even number
+		subghz_decenc_ctl.ntx_raw_len = hdma_subghz_tx.Instance->CBR1; // Update the remainder
 		if ( toggle )
-			timerhdl_subghz_tx.Instance->CCR4 ^= 0xFFFF; // toggle to create high pulse (100% PWM) and low pulse (0% PWM)
+			timerhdl_subghz_tx.Instance->CCR4 ^= 0xFFFF; // Toggle to create high pulse (100% PWM) and low pulse (0% PWM)
 	} // if ( !subghz_tx_tc_flag )
 	else // DMA completed
 	{
 		if ( subghz_tx_tc_flag++ > 2 ) // DMA is 2-bits ahead of this timer.
 		{
 			q_item.q_evt_type = Q_EVENT_SUBGHZ_TX;
-			xQueueSendFromISR(main_q_hdl, &q_item, &xHigherPriorityTaskWoken);
+			if (xQueueSendFromISR(main_q_hdl, &q_item, &xHigherPriorityTaskWoken) != pdPASS)
+				m1_isr_drop_note_subghz_tx();
 			portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 			subghz_tx_tc_flag = 0;
 		}
 		timerhdl_subghz_tx.Instance->CCR4 = 0;
 	} // else
 } // void TIM1_UP_IRQHandler(void)
+
+
+
+/*============================================================================*/
+/**
+  * @brief  A duplicate of the TIM1_UP_IRQHandler()
+  * 		This ISR is only enabled when the SubGHz Tx pin is mapped to an external GPIO
+  * @param
+  * @retval None
+  */
+/*============================================================================*/
+void TIM8_UP_IRQHandler(void)
+{
+	TIM1_UP_IRQHandler();
+} // void TIM8_UP_IRQHandler(void)
 
 
 
@@ -717,7 +773,7 @@ void TIM1_CC_IRQHandler(void)
 	} // else
 
 	send_to_q = 1;
-	if ( subghz_record_mode_flag )
+	if ( subghz_record_mode_flag || subghz_scan_mode_flag )
 	{
 #ifdef M1_APP_SUB_GHZ_RAW_DATA_RX_NOISE_FILTER_ENABLE
 		if ( cap_val < M1_APP_SUB_GHZ_RAW_DATA_NOISE_PULSE_WIDTH ) // Possibly noise?
@@ -736,7 +792,15 @@ void TIM1_CC_IRQHandler(void)
 		if ( true )
 #endif // #ifdef M1_APP_SUB_GHZ_RAW_DATA_RX_NOISE_FILTER_ENABLE
 		{
-			m1_ringbuffer_insert(&subghz_rx_rawdata_rb, (uint8_t *)&cap_val);
+			subghz_diag_isr_pulses++;
+			/* SPSC: only the consumer owns tail. Freeze on overflow so no
+			 * later samples can disguise a missing edge/polarity discontinuity. */
+			if (!subghz_capture_overflow &&
+			    m1_ringbuffer_write(&subghz_rx_rawdata_rb, (uint8_t *)&cap_val, 1) != 1)
+			{
+				subghz_diag_insert_fail++;
+				subghz_capture_overflow = 1;
+			}
 			pulse_counter++;
 			if ( pulse_counter >= SUBGHZ_RAW_DATA_SAMPLES_TO_RW )
 			{
@@ -751,7 +815,8 @@ void TIM1_CC_IRQHandler(void)
 	if ( send_to_q )
 	{
 		q_item.q_evt_type = Q_EVENT_SUBGHZ_RX;
-		xQueueSendFromISR(main_q_hdl, &q_item, &xHigherPriorityTaskWoken); // Send sample to queue, return: pdPASS or errQUEUE_FULL
+		if (xQueueSendFromISR(main_q_hdl, &q_item, &xHigherPriorityTaskWoken) != pdPASS)
+			m1_isr_drop_note_subghz_rx();
 		portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 	} // if ( send_to_q )
 

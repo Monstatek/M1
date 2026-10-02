@@ -13,8 +13,16 @@
 #ifndef M1_GPIO_H_
 #define M1_GPIO_H_
 
-#define M1_EXT_GPIO_LIST_N						15 // Exclude PA9 (UART1_TX), PA10 (UART1_RX)
-													// (PA14 (SWCLK) and PA13 (SWDIO))
+//#define DEBUG_SWLINK_USED
+#undef DEBUG_SWLINK_USED
+
+#ifndef DEBUG_SWLINK_USED
+#define M1_EXT_GPIO_LIST_N                      15 // Exclude PA9 (UART1_TX), PA10 (UART1_RX)
+#else
+#define M1_EXT_GPIO_LIST_N                      13 // Exclude PA13 (SWCLK_Pin), PA14 (SWDIO_Pin)
+                                                   // Exclude PA9 (UART1_TX), PA10 (UART1_RX)
+#endif
+// (PA14 (SWCLK) and PA13 (SWDIO))
 #define M1_EXT_GPIO_FIRST_ID					3 // First GPIO pin id in the GPIO buffer
 
 extern S_GPIO_IO_t m1_ext_gpio[];

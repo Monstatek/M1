@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<!-- See COPYING.txt for license details. -->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>M1CP Web Serial Test Client</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: ui-monospace, Menlo, Consolas, monospace; margin: 0; padding: 16px;
+         max-width: 900px; margin-inline: auto; line-height: 1.4; }
+  h1 { font-size: 1.15rem; margin: 0 0 4px; }
+  .sub { opacity: 0.7; font-size: 0.8rem; margin-bottom: 12px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+  button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid gray;
+           background: transparent; cursor: pointer; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  #status { padding: 4px 10px; border-radius: 6px; border: 1px solid gray; font-size: 0.85rem; }
+  #status.on  { background: #0a640a; color: #fff; border-color: #0a640a; }
+  #status.off { background: #7a1010; color: #fff; border-color: #7a1010; }
+  #info { white-space: pre; font-size: 0.8rem; border: 1px solid gray; border-radius: 6px;
+          padding: 8px; overflow-x: auto; margin-bottom: 10px; min-height: 1.2em; }
+  #log { height: 46vh; overflow-y: auto; border: 1px solid gray; border-radius: 6px;
+         padding: 8px; font-size: 0.75rem; white-space: pre-wrap; word-break: break-all; }
+  .tx { color: #2f6fdb; } .rx { color: #0a7d0a; } .er { color: #c02020; } .sy { opacity: 0.7; }
+  .warn { background: #7a4a10; color:#fff; padding:6px 10px; border-radius:6px; font-size:0.8rem; margin-bottom:10px; }
+</style>
+</head>
+<body>
+  <h1>M1CP Web Serial Test Client</h1>
+  <div class="sub">Engineering validation tool for M1CP v1 (Gate A/B/C) &mdash; not the final web app.</div>
+  <div class="warn" style="background:#33415522;color:inherit;border:1px solid #556;">
+    Read-only client: <b>FW_APPLY, FW_ACTIVATE, bank/flash operations and ESP32 flashing are hard-blocked</b>
+    (opcodes 0x21&ndash;0x3F). Only Gate A queries, Gate B Add Files, and the read-only FW_VALIDATE (0x20) can be sent.
+  </div>
+
+  <div id="unsupported" class="warn" hidden>
+    This browser has no Web Serial API. Use Chrome/Edge (desktop) over HTTPS or http://localhost.
+  </div>
+
+  <div class="row">
+    <button id="btnConnect">Connect Device</button>
+    <span id="status" class="off">Disconnected</span>
+  </div>
+
+  <div class="row">
+    <button id="btnHello"    disabled>HELLO</button>
+    <button id="btnPing"     disabled>PING</button>
+    <button id="btnCaps"     disabled>GET CAPABILITIES</button>
+    <button id="btnInfo"     disabled>GET DEVICE INFO</button>
+    <button id="btnStatus"   disabled>GET STATUS</button>
+    <button id="btnEnd"      disabled>END SESSION</button>
+    <button id="btnClear">Clear Log</button>
+  </div>
+
+  <div id="info">device info will appear here</div>
+
+  <details>
+    <summary>Gate B &mdash; manual Add Files &rarr; 0:/MONSTA/</summary>
+    <div class="row" style="margin-top:8px;">
+      <input type="file" id="fileUpload" />
+      <label><input type="checkbox" id="ow" checked /> overwrite</label>
+      <button id="btnUpload" disabled>Upload</button>
+      <button id="btnAbort" disabled>Cancel</button>
+      <progress id="prog" max="100" value="0"></progress><span id="progTxt"></span>
+    </div>
+    <div class="row">
+      <input type="text" id="fsName" placeholder="name.ext" size="18" />
+      <button id="btnStat" disabled>FS_STAT</button>
+      <button id="btnDelete" disabled>FS_DELETE</button>
+    </div>
+  </details>
+
+  <h2 style="font-size:0.95rem;margin:14px 0 4px;">Gate C &mdash; automated FW_VALIDATE conformance run (read-only)</h2>
+  <div class="row">
+    <label>fixtures URL <input type="text" id="fxBase" value="../../tests/m1pkg/fixtures/" size="30" /></label>
+    <label>fw commit <input type="text" id="fwCommit" value="1233995" size="10" /></label>
+  </div>
+  <div class="row">
+    <button id="btnRun" disabled>Run fixture sweep</button>
+    <button id="btnReport" disabled>Download JSON report</button>
+    <span id="runSummary"></span>
+  </div>
+  <div id="results" class="info" style="white-space:pre;font-size:0.78rem;border:1px solid gray;border-radius:6px;padding:8px;overflow-x:auto;margin-bottom:10px;">no run yet</div>
+
+  <div id="log"></div>
+
+<script src="m1cp.js"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var logEl = $('log'), infoEl = $('info'), statusEl = $('status');
+
+  function log(cls, msg) {
+    var d = document.createElement('div');
+    d.className = cls;
+    d.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg;
+    logEl.appendChild(d);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  if (!('serial' in navigator)) { $('unsupported').hidden = false; }
+
+  var port = null, writer = null, reader = null, decoder = null;
+  var seqCounter = 1, pending = {}, session = false, readLoopRunning = false;
+
+  function setSession(on, text) {
+    session = on;
+    statusEl.textContent = text;
+    statusEl.className = on ? 'on' : 'off';
+    ['btnHello','btnPing','btnCaps','btnInfo','btnStatus','btnEnd',
+     'btnUpload','btnStat','btnDelete','btnRun'].forEach(function (id) { $(id).disabled = !on; });
+    $('btnConnect').textContent = (port ? 'Disconnect Device' : 'Connect Device');
+  }
+
+  function nextSeq() { var s = seqCounter & 0xFFFF; seqCounter = (seqCounter + 1) & 0xFFFF; if (seqCounter === 0) seqCounter = 1; return s; }
+
+  // Hard-block any firmware-altering opcode: FW_APPLY(0x21), FW_ACTIVATE(0x22),
+  // FW_ABORT(0x23), the rest of the STM32-update namespace (0x24..0x2F) and all
+  // ESP32 flashing (0x30..0x3F). FW_VALIDATE(0x20) is read-only and allowed.
+  function isBlockedOpcode(type) { return type >= 0x21 && type <= 0x3F; }
+
+  async function sendFrame(type, flags, seq, payload) {
+    if (isBlockedOpcode(type)) {
+      log('er', 'BLOCKED: opcode 0x' + type.toString(16) + ' (flash/bank/ESP32 mutation) is hard-disabled in this read-only test client');
+      throw new Error('blocked opcode 0x' + type.toString(16));
+    }
+    var f = M1CP.encodeFrame(type, flags, seq, payload || new Uint8Array(0));
+    log('tx', 'TX ' + (M1CP.CMD_NAME[type] || ('0x'+type.toString(16))) + ' seq=' + seq +
+        ' len=' + (payload ? payload.length : 0) + '  ' + M1CP.toHex(f));
+    await writer.write(f);
+  }
+
+  // Send a request and await its matching response (by seq). Times out at 2000 ms.
+  function request(type, payload) {
+    var seq = nextSeq();
+    return new Promise(function (resolve, reject) {
+      pending[seq] = {
+        resolve: resolve, reject: reject, type: type,
+        timer: setTimeout(function () {
+          delete pending[seq];
+          log('er', 'TIMEOUT waiting for response to ' + (M1CP.CMD_NAME[type] || type) + ' seq=' + seq);
+          reject(new Error('timeout'));
+        }, 2000)
+      };
+      sendFrame(type, 0, seq, payload).catch(function (e) {
+        clearTimeout(pending[seq].timer); delete pending[seq]; reject(e);
+      });
+    });
+  }
+
+  function handleFrame(fr) {
+    var isResp = !!(fr.flags & M1CP.FLAG.RESPONSE);
+    var isNack = !!(fr.flags & M1CP.FLAG.NACK);
+    var isAck  = !!(fr.flags & M1CP.FLAG.ACK);
+    var tag = (M1CP.CMD_NAME[fr.type] || ('0x' + fr.type.toString(16)));
+    var flags = (isResp ? 'RESPONSE ' : '') + (isAck ? 'ACK ' : '') + (isNack ? 'NACK ' : '');
+    var extra = '';
+    if (isNack && fr.payload.length >= 1) { extra = ' error=' + M1CP.errName(fr.payload[0]); }
+    log('rx', 'RX ' + tag + ' ' + flags + 'seq=' + fr.seq + ' len=' + fr.payload.length + extra +
+        (fr.payload.length ? ('  payload=' + M1CP.toHex(fr.payload)) : ''));
+
+    var p = pending[fr.seq];
+    if (isResp && p) {
+      clearTimeout(p.timer); delete pending[fr.seq];
+      p.resolve(fr);
+    }
+  }
+
+  async function readLoop() {
+    readLoopRunning = true;
+    try {
+      reader = port.readable.getReader();
+      for (;;) {
+        var res = await reader.read();
+        if (res.done) break;
+        if (res.value && res.value.length) {
+          log('sy', 'rx bytes: ' + M1CP.toHex(res.value));
+          var events = decoder.push(res.value);
+          for (var i = 0; i < events.length; i++) {
+            if (events[i].frame) { handleFrame(events[i].frame); }
+            else if (events[i].error) { log('er', 'parser: ' + events[i].error +
+              (events[i].payload_len ? (' len=' + events[i].payload_len) : '')); }
+          }
+        }
+      }
+    } catch (e) {
+      log('er', 'read loop ended: ' + e.message);
+    } finally {
+      readLoopRunning = false;
+      try { reader.releaseLock(); } catch (_) {}
+      // Unexpected disconnect / stream end -> clean up UI.
+      if (port) { cleanup('link closed'); }
+    }
+  }
+
+  async function connect() {
+    try {
+      port = await navigator.serial.requestPort();
+      await port.open({ baudRate: 115200 });
+      writer = port.writable.getWriter();
+      decoder = new M1CP.Decoder();
+      seqCounter = 1; pending = {};
+      log('sy', 'port opened; starting receive loop and HELLO handshake');
+      readLoop(); // background
+
+      var resp = await request(M1CP.CMD.HELLO, new Uint8Array(0));
+      if ((resp.flags & M1CP.FLAG.RESPONSE) && resp.type === M1CP.CMD.HELLO && !(resp.flags & M1CP.FLAG.NACK)) {
+        var h = M1CP.decodeHelloResponse(resp.payload);
+        setSession(true, 'Connected — M1CP session');
+        log('sy', 'HELLO_RESPONSE ok: protocol v' + h.version + ', max_payload=' + h.max_payload +
+            ', caps=0x' + (h.capabilities >>> 0).toString(16));
+      } else {
+        throw new Error('HELLO not acknowledged');
+      }
+    } catch (e) {
+      log('er', 'connect/HELLO failed: ' + e.message);
+      await disconnect();
+    }
+  }
+
+  function cleanup(reason) {
+    setSession(false, 'Disconnected');
+    $('btnConnect').textContent = 'Connect Device';
+    if (reason) { log('sy', 'disconnected (' + reason + ')'); }
+    // clear pending waiters
+    Object.keys(pending).forEach(function (s) { clearTimeout(pending[s].timer); pending[s].reject(new Error('disconnected')); });
+    pending = {};
+    port = null; writer = null; reader = null; decoder = null;
+  }
+
+  async function disconnect() {
+    try { if (reader) { await reader.cancel(); } } catch (_) {}
+    try { if (writer) { writer.releaseLock(); } } catch (_) {}
+    var pt = port;
+    try { if (pt && pt.close) { await pt.close(); } } catch (_) {}
+    cleanup('user request');
+  }
+
+  // ---- button wiring ----
+  $('btnConnect').addEventListener('click', function () { if (port) { disconnect(); } else { connect(); } });
+  $('btnClear').addEventListener('click', function () { logEl.textContent = ''; });
+
+  $('btnHello').addEventListener('click', function () {
+    request(M1CP.CMD.HELLO, new Uint8Array(0)).catch(function () {});
+  });
+
+  $('btnPing').addEventListener('click', function () {
+    var probe = new TextEncoder().encode('M1CP_BROWSER_TEST');
+    request(M1CP.CMD.PING, probe).then(function (fr) {
+      var same = fr.payload.length === probe.length && fr.payload.every(function (v, i) { return v === probe[i]; });
+      log(same ? 'sy' : 'er', 'PING echo ' + (same ? 'MATCH' : 'MISMATCH') +
+          ' ("' + new TextDecoder().decode(fr.payload) + '")');
+    }).catch(function () {});
+  });
+
+  $('btnCaps').addEventListener('click', function () {
+    request(M1CP.CMD.GET_CAPABILITIES).then(function (fr) {
+      var c = M1CP.decodeCapabilities(fr.payload);
+      log('sy', 'CAPABILITIES: [' + M1CP.capList(c.capabilities).join(',') + '] flags=0x' +
+          (c.capabilities >>> 0).toString(16) + ', max_payload=' + c.max_payload + ', version=' + c.version);
+      var adv = !!(c.capabilities & M1CP.CAP.STM32_UPDATE);
+      log(adv ? 'er' : 'sy', 'check: STM32_UPDATE ' + (adv ? 'ADVERTISED (UNEXPECTED — flash path must stay hidden)' : 'not advertised (expected)'));
+    }).catch(function () {});
+  });
+
+  $('btnInfo').addEventListener('click', function () {
+    request(M1CP.CMD.GET_DEVICE_INFO).then(function (fr) {
+      var d = M1CP.decodeDeviceInfo(fr.payload);
+      if (d.error) { log('er', 'device info decode error: ' + d.error); infoEl.textContent = 'decode error'; return; }
+      var lines = [
+        'family           : ' + d.device_family,
+        'protocol version : ' + d.protocol_version,
+        'fw version       : ' + d.fw_version,
+        'hw revision      : ' + d.hw_revision,
+        'stm32 devid      : ' + d.stm32_devid,
+        'stm32 uid        : ' + d.stm32_uid,
+        'active bank      : ' + d.active_bank,
+        'flash bank cap   : ' + d.flash_bank_capacity + ' bytes',
+        'sd present       : ' + d.sd_present,
+        'sd mount state   : ' + d.sd_mount_state,
+        'sd owner         : ' + d.sd_owner,
+        'sd total bytes   : ' + d.sd_total_bytes,
+        'sd free bytes    : ' + d.sd_free_bytes,
+        'esp32 present    : ' + d.esp32_present,
+        'esp32 fw version : ' + d.esp32_fw_version,
+        'capability flags : 0x' + (d.capability_flags >>> 0).toString(16),
+        'max payload      : ' + d.max_payload
+      ];
+      infoEl.textContent = lines.join('\n');
+      log('sy', 'DEVICE INFO decoded (' + fr.payload.length + ' bytes)');
+    }).catch(function () {});
+  });
+
+  $('btnEnd').addEventListener('click', function () {
+    request(M1CP.CMD.END_SESSION).then(function (fr) {
+      var ack = !!(fr.flags & M1CP.FLAG.ACK);
+      log('sy', 'END_SESSION ' + (ack ? 'ACK' : 'response') + ' — firmware returns to legacy CDC');
+      // Release the serial port so the legacy console can be verified in a
+      // terminal. Reconnect (which re-runs HELLO) starts a fresh session.
+      disconnect();
+    }).catch(function () {});
+  });
+
+  // ---------- Gate B / Gate C validation harness ----------
+  var abortReq = false, lastReport = null;
+
+  // request() wrapper exposing ok/nack/err.
+  async function req(type, payload) {
+    var fr = await request(type, payload || new Uint8Array(0));
+    var nack = !!(fr.flags & M1CP.FLAG.NACK);
+    return { ok: !nack, nack: nack, err: (nack && fr.payload.length) ? M1CP.errName(fr.payload[0]) : null, payload: fr.payload };
+  }
+
+  // Chunked Add Files upload of raw bytes to 0:/MONSTA/<name>.
+  async function uploadBytes(name, bytes, overwrite) {
+    var crc = M1CP.crc32(bytes);
+    var b = await req(M1CP.CMD.FS_BEGIN, M1CP.encodeFsBegin(name, bytes.length, crc, overwrite));
+    if (!b.ok) { return { ok: false, stage: 'begin', err: b.err }; }
+    var br = M1CP.decodeFsBeginResp(b.payload), session = br.session, chunk = Math.min(br.max_chunk || 480, 480), off = 0;
+    abortReq = false; $('btnAbort').disabled = false;
+    try {
+      while (off < bytes.length) {
+        if (abortReq) { await req(M1CP.CMD.FS_ABORT, M1CP.encodeSession(session)); return { ok: false, stage: 'abort', err: 'ABORTED' }; }
+        var end = Math.min(off + chunk, bytes.length);
+        var d = await req(M1CP.CMD.FS_DATA, M1CP.encodeFsData(session, off, bytes.subarray(off, end)));
+        if (!d.ok) { return { ok: false, stage: 'data', err: d.err, off: off }; }
+        off = M1CP.decodeFsDataResp(d.payload).next_offset;
+        var pct = Math.floor(off * 100 / bytes.length); $('prog').value = pct; $('progTxt').textContent = pct + '%';
+      }
+      var c = await req(M1CP.CMD.FS_COMMIT, M1CP.encodeSession(session));
+      return c.ok ? { ok: true } : { ok: false, stage: 'commit', err: c.err };
+    } finally { $('btnAbort').disabled = true; }
+  }
+  async function deleteStaged(name) { try { var r = await req(M1CP.CMD.FS_DELETE, M1CP.encodeName(name)); return r.ok; } catch (e) { return false; } }
+  async function sha256hex(bytes) {
+    var h = await crypto.subtle.digest('SHA-256', bytes); var a = new Uint8Array(h), s = '';
+    for (var i = 0; i < a.length; i++) { s += (a[i] < 16 ? '0' : '') + a[i].toString(16); } return s;
+  }
+  async function getDeviceInfo() { var r = await req(M1CP.CMD.GET_DEVICE_INFO); return r.ok ? M1CP.decodeDeviceInfo(r.payload) : { error: r.err }; }
+
+  function renderResults(rows) {
+    var head = 'fixture                  expect        actual        hash pass\n';
+    var body = rows.map(function (r) {
+      return r.name.padEnd(24) + ' ' + String(r.expect).padEnd(13) + ' ' + String(r.actual || '').padEnd(13) +
+             ' ' + (r.hashOk ? 'ok  ' : 'BAD ') + ' ' + (r.pass ? 'PASS' : 'FAIL');
+    }).join('\n');
+    $('results').textContent = head + body;
+  }
+
+  // Requirements 4-9: upload each fixture via real Add Files, run only read-only
+  // FW_VALIDATE, compare to the manifest, render actual-vs-expected, clean up.
+  async function runSweep() {
+    $('btnRun').disabled = true; $('btnReport').disabled = true; lastReport = null;
+    var base = $('fxBase').value; if (base && base.charAt(base.length - 1) !== '/') { base += '/'; }
+    var man;
+    try { man = await (await fetch(base + 'MANIFEST.json')).json(); }
+    catch (e) { log('er', 'cannot load manifest at ' + base + 'MANIFEST.json: ' + e.message + ' (serve the repo root over localhost)'); $('btnRun').disabled = false; return; }
+
+    var devInfo = await getDeviceInfo();
+    var stm32Advertised = !!((devInfo.capability_flags || 0) & M1CP.CAP.STM32_UPDATE);
+    log(stm32Advertised ? 'er' : 'sy', 'STM32_UPDATE ' + (stm32Advertised ? 'ADVERTISED (UNEXPECTED)' : 'not advertised (expected)'));
+
+    var results = [], rows = [];
+    for (var i = 0; i < man.fixtures.length; i++) {
+      var fx = man.fixtures[i], name = fx.name;
+      var rec = { name: name, expect: fx.expect, expect_versions: fx.versions, sha256: fx.sha256, hashOk: false, actual: null, actual_versions: null, pass: false };
+      try {
+        var bytes = new Uint8Array(await (await fetch(base + name)).arrayBuffer());
+        rec.hashOk = (await sha256hex(bytes)) === fx.sha256;
+        var up = await uploadBytes(name, bytes, true);
+        if (!up.ok) { rec.actual = 'UPLOAD_' + (up.err || up.stage); }
+        else {
+          var v = await req(M1CP.CMD.FW_VALIDATE, M1CP.encodeName(name));
+          if (v.ok) {
+            var vr = M1CP.decodeFwValidateResp(v.payload);
+            rec.actual = 'NONE'; rec.actual_versions = { fw: vr.fw_version, resource: vr.resource_version };
+            rec.pass = (fx.expect === 'NONE') && rec.hashOk &&
+              (!fx.versions || (fx.versions.fw === vr.fw_version && fx.versions.resource === vr.resource_version));
+          } else {
+            rec.actual = v.err;
+            rec.pass = (fx.expect === v.err) && rec.hashOk;
+          }
+          await deleteStaged(name);  // requirement 9: clean up staged test file
+        }
+      } catch (e) { rec.actual = 'EXC:' + e.message; }
+      rows.push(rec); results.push(rec); renderResults(rows);
+    }
+    var passed = results.filter(function (r) { return r.pass; }).length;
+    $('runSummary').textContent = passed + '/' + results.length + ' passed';
+    lastReport = {
+      report: 'M1CP Gate C FW_VALIDATE conformance', generated_at: new Date().toISOString(),
+      firmware_commit: $('fwCommit').value, device_info: devInfo,
+      stm32_update_advertised: stm32Advertised, manifest_target: man.target,
+      summary: { passed: passed, total: results.length }, fixtures: results
+    };
+    $('btnReport').disabled = false; $('btnRun').disabled = false;
+    log(passed === results.length ? 'sy' : 'er', 'fixture sweep: ' + passed + '/' + results.length + ' passed');
+  }
+
+  function downloadReport() {
+    if (!lastReport) { return; }
+    var blob = new Blob([JSON.stringify(lastReport, null, 2)], { type: 'application/json' });
+    var url = URL.createObjectURL(blob), a = document.createElement('a');
+    a.href = url; a.download = 'm1cp_gateC_report_' + ($('fwCommit').value || 'fw') + '.json';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+  }
+
+  $('btnStatus').addEventListener('click', function () {
+    req(M1CP.CMD.GET_STATUS).then(function (r) {
+      if (!r.ok) { log('er', 'GET_STATUS NACK ' + r.err); return; }
+      infoEl.textContent = 'STATUS\n' + JSON.stringify(M1CP.decodeStatus(r.payload), null, 2);
+    }).catch(function () {});
+  });
+  $('btnUpload').addEventListener('click', function () {
+    var f = $('fileUpload').files[0]; if (!f) { log('er', 'no file selected'); return; }
+    f.arrayBuffer().then(function (ab) { return uploadBytes(f.name, new Uint8Array(ab), $('ow').checked); })
+      .then(function (u) { log(u.ok ? 'sy' : 'er', 'upload ' + f.name + ': ' + (u.ok ? 'OK (0:/MONSTA/)' : (u.stage + ' NACK ' + u.err))); });
+  });
+  $('btnAbort').addEventListener('click', function () { abortReq = true; });
+  $('btnStat').addEventListener('click', function () {
+    var n = $('fsName').value.trim(); if (!n) { return; }
+    req(M1CP.CMD.FS_STAT, M1CP.encodeName(n)).then(function (r) {
+      if (!r.ok) { log('er', 'FS_STAT NACK ' + r.err); return; }
+      var s = M1CP.decodeFsStatResp(r.payload); log('sy', 'FS_STAT ' + n + ': ' + (s.exists ? ('exists size=' + s.size) : 'not found'));
+    });
+  });
+  $('btnDelete').addEventListener('click', function () {
+    var n = $('fsName').value.trim(); if (!n) { return; }
+    req(M1CP.CMD.FS_DELETE, M1CP.encodeName(n)).then(function (r) { log(r.ok ? 'sy' : 'er', 'FS_DELETE ' + n + ': ' + (r.ok ? 'deleted' : ('NACK ' + r.err))); });
+  });
+  $('btnRun').addEventListener('click', function () { runSweep().catch(function (e) { log('er', 'sweep error: ' + e.message); $('btnRun').disabled = false; }); });
+  $('btnReport').addEventListener('click', downloadReport);
+
+  window.addEventListener('beforeunload', function () { if (port) { disconnect(); } });
+})();
+</script>
+</body>
+</html>

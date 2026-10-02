@@ -21,7 +21,7 @@
 
 #define M1_DISP_MAIN_MENU_FONT_N		u8g2_font_resoledmedium_tr // 5x10 //u8g2_font_6x10_tf //, , u8g2_font_medsans_tr: clear font
 #define M1_DISP_MAIN_MENU_FONT_B		u8g2_font_helvB08_tf
-#define M1_DISP_SUB_MENU_FONT_N			u8g2_font_NokiaSmallPlain_tf //u8g2_font_spleen5x8_mf // small normal font
+#define M1_DISP_SUB_MENU_FONT_N			u8g2_font_resoledmedium_tr // Nokia removed; unified with the main-menu font
 #define M1_DISP_SUB_MENU_FONT_B			u8g2_font_squeezed_b7_tr //, u8g2_font_ncenB08_tf: slightly wide bold,
 #define M1_DISP_FUNC_MENU_FONT_N		u8g2_font_spleen5x8_mf // u8g2_font_nine_by_five_nbp_tf // u8g2_font_miranda_nbp_tf // u8g2_font_5x8_tf
 #define M1_DISP_FUNC_MENU_FONT_N2		u8g2_font_nine_by_five_nbp_tf // larger and clear font
@@ -121,8 +121,6 @@ typedef enum {
     TEXT_ALIGN_RIGHT
 } S_M1_text_align_t;
 
-extern const uint8_t *menu_m1_logo_array[];
-
 extern const uint8_t menu_m1_icon_bluetooth[];
 extern const uint8_t menu_m1_icon_gpio[];
 extern const uint8_t menu_m1_icon_infrared[];
@@ -131,17 +129,18 @@ extern const uint8_t menu_m1_icon_rfid[];
 extern const uint8_t menu_m1_icon_wave[];
 extern const uint8_t menu_m1_icon_setting[];
 extern const uint8_t menu_m1_icon_wifi[];
-extern const uint8_t menu_m1_icon_M1_logo_1[];
+extern const uint8_t menu_m1_icon_usb[];
+extern const uint8_t usb_drive_icon_52x24[];   /* USB Drive screen icon */
 extern const uint8_t m1_logo_26x14[];
-extern const uint8_t m1_logo_40x32[];
+extern const uint8_t m1_boot_logo_128x64[];   /* approved full-screen power-on boot artwork */
 extern const uint8_t menu_scroll_bar_4x64[];
 extern const uint8_t m1_frame_75x16[];
-extern const uint8_t m1_frame_128_14[];
 extern const uint8_t m1_frame_128x32[];
 extern const uint8_t m1_frame_128x22[];
 extern const uint8_t m1_frame_64x76[];
 extern const uint8_t m1_progress_60x10[];
 extern const uint8_t hourglass_18x32[];
+extern const uint8_t hourglass_16x29[];
 extern const uint8_t arrowleft_10x10[];
 extern const uint8_t arrowright_10x10[];
 extern const uint8_t arrowright_8x8[];
@@ -170,17 +169,13 @@ extern const uint8_t weather_cold_20x20[];
 extern const uint8_t weather_hot_20x20[];
 extern const uint8_t return_10x10[];
 extern const uint8_t remote_48x25[];
-extern const uint8_t subghz_antenna_50x27[];
 extern const uint8_t fw_update_48x48[];
 extern const uint8_t target_10x10[];
 extern const uint8_t target_i_10x10[];
-extern const uint8_t wifi_error_32x32[];
 extern const uint8_t sd_card_error_46x36[];
 extern const uint8_t micro_sd_card_error_format[];
-extern const uint8_t nfc_read_48x48[];
-extern const uint8_t nfc_saved_63_63[];
+extern const uint8_t m1_saved_screen_128x64[];   /* universal "Saved" confirmation screen, 128x64 1-bit */
 extern const uint8_t nfc_emit_48x48[];
-extern const uint8_t rfid_read_125x24[];
 extern const uint8_t subghz_transmission_64_30[];
 extern const uint8_t fw_update_slide_strip_126x14[];
 extern const uint8_t fw_update_slider_5x8[];
@@ -203,12 +198,15 @@ void m1_gui_init(void);
 void m1_gui_welcome_scr(void);
 void m1_gui_menu_update(const S_M1_Menu_t *phmenu, uint8_t sel_item, uint8_t direction);
 uint8_t m1_gui_submenu_update(const char *phmenu[], uint8_t num_items, uint8_t sel_item, uint8_t direction);
+void m1_gui_force_sub_menu_level(void);
 void m1_gui_scr_animation(void);
 void m1_gui_let_update_fw(void);
 void m1_info_box_display_init(bool high_box);
 void m1_info_box_display_clear(void);
 void m1_info_box_display_draw(uint8_t box_row, const uint8_t *ptext);
 uint8_t m1_message_box(u8g2_t *u8g2, const char *title1, const char *title2, const char *title3, const char *buttons);
+void m1_draw_file_saved_screen(void);
+void m1_wait_back_to_exit(void);
 void m1_draw_bottom_bar(u8g2_t *u8g2, const uint8_t *lbitmap, const char *ltext, const char *rtext, const uint8_t *rbitmap);
 void m1_draw_text(u8g2_t *u8g2,
                  int x, int y,
@@ -222,5 +220,10 @@ void m1_draw_text_box(u8g2_t *u8g2,
                     const char *text,
                     S_M1_text_align_t align);
 void m1_image_message(const uint8_t *pimage, uint8_t image_w, uint8_t image_h, const char *message);
+
+/* Shared NFC/RFID Write screen graphic: centered card icon flanked by
+ * inward-pointing RF arrows, with a centered status line ("WRITING..."
+ * or "SUCCESS").  Rendering only.  Defined in m1_display.c. */
+void m1_draw_write_screen(const char *status);
 
 #endif /* M1_DISPLAY_H_ */

@@ -1,5 +1,3 @@
-# See COPYING.txt for license details.
-
 # Creates C resources file from files in given directory recursively
 function(create_resources dir output)
     # Create empty output file

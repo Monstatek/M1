@@ -1,0 +1,313 @@
+Date: Feb 16th 2025
+
+1. Hardware:
+STM32H573VIT6
+IC MCU 32BIT 2MB FLASH 100LQFP
+Hardware revision: 2.x, Sep-15-2024
+
+2. Firmware development platform:
+STM32CubeIDE for Windows.
+Current version: 1.16.1
+Download link: https://www.st.com/en/development-tools/stm32cubeide.html
+
+3. Project files structure:
+Given in the file Project files.txt
+
+4. Brief firmware description:
+
+The firmware structure with basic FreeRTOS has been implemented. It has been tested and worked as expected.
+
+The following functions have been implemented and tested or partially developed:
+
+- Graphics
+- Menu system
+- LCD
+- Keypad
+- Led
+- Infrared (under development)
+- NFC (Partially developed, not tested yet)
+- Battery charger (Partially developed, not tested yet)
+- Buzzer (Partially developed, tested)
+- Debug and log (Partially developed, tested)
+- Command line interface CLI (Partially developed, tested)
+- Others
+
+//****************************************************************************//
+
+Date: Apr 23rd 2025
+
+Brief description:
+
+- Command line interface CLI: 	SD Card
+ (UART interface, baud 460800)	LED
+								LCD
+- Data log through UART interface
+- SD card
+- Virtual keyboard
+- WDT
+- Others
+- Restructured for FreeRTOS
+
+
+//****************************************************************************//
+
+Date: May-05-2025: pulling code from GitHub and start working on this code
+
+-Ext Int conflict:
+EXTI 3 is used for both SD card detect (PD3) and Fuel Gauge INT (PE3)
+*Fix: SD_DETECT is moved to PD1 (EXTI 1)
+- SD card error image displayed incorrectly
+- Infrared doesn't work.
+*Fix: Rx and Tx pins are swapped in the new hardware. They should be swapped back to the original design.
+- Rx/Tx antenna should be changed from direct-tie configuration to Tx/Rx-switch configuration.
+Tx power will be increased from 17dBm to 20dBm.
+- RF SW1,2 have mistake with RF1,2 pins
+- Increase Infrared current with PWM = 30%
+- Boot0 pin isolation
+
+//****************************************************************************//
+Date: June 5 2025
+
+Brief description:
+- SI4463 is up.
+- Sub-GHz CW implemented for 315/433/915. Tested and worked.
+- ESP32 module is up.
+- Wifi AP scan implemented. Tested and worked.
+- Update/Improvement/Optimization for others.
+
+//****************************************************************************//
+Date: June 19 2025
+
+Brief description:
+- ESP32 serial flasher implemented. Tested and worked.
+(Need to check for battery status before proceeding)
+- Update/Improvement/Optimization for others.
+
+//****************************************************************************//
+New hardware revision: T1 mainboard
+
+- I2C speed reduced to 100Kbps (was 400Kbps) to work properly!
+- HAL_SD_ConfigWideBusOperation() error (randomly)
+//****************************************************************************//
+Date: June 26 2025
+- Change esp-hosted-fg package to esp-hosted-mcu package for ESP32 module.
+The new package has support for both Wifi and Bluetooth.
+-
+//****************************************************************************//
+Date: Jul 17 2025
+`esp-nimble` is a fork of Apache NimBLE and available from
+ESP-IDF. The NimBLE Bluetooth stack provides Bluetooth Low Energy (BLE)
+only functionality.
+`esp-bluedroid` is a fork of the Bluedroid based stack and available
+from ESP-IDF. The BlueDroid stack supports classic Bluetooth as well
+as Bluetooth Low Energy.
+
+`esp-bluedroid` has been implemented for M1. The work is incomplete. There're still errors
+when compiling!
+The work is temporarily stopped to switch to esp-nimble.
+//****************************************************************************//
+Date: Jul 23 2025
+`esp-nimble` has been implemented for M1. The work is incomplete. There're NO errors
+when compiling. There's unknown issue with the linking! The output hex file does not work properly when flashed!
+Error when debugging or running: no source available for "reset_handler() at...
+//****************************************************************************//
+Date: Jul 23 2025
+Implementing SPI AT based on esp-at-v4.1.0.0.
+//****************************************************************************//
+Date: Aug 29 2025
+- GUI for menu and sub-functions improved
+- Sub-GHz: Rx and decode Princeton at 433.92MHz, Rx raw record and replay with samples stored in RAM
+- Others
+//****************************************************************************//
+Date: Sep 02 2025
+- Merged with the SW branch completely. Tested!
+- ST folder has been moved to ./NFC/Middlewares/ from ./Middlewares/.
+This makes this folder independent with the configuration tool whether NFC is enabled or not. 
+
+Questions for SW team:
+- I2C1 clock setting is very different with value calculated by configuration tool. Why?
+- SPI clock for NFC is set very slow (~300KHz). What's the problem?
+- Battery level in battery info sometimes shows 0% though fully charged!
+- ST's NFC demo code should be rewritten for MonstaTek.
+
+//****************************************************************************//
+Date: Sep 05 2025
+- Implement GUI and support functions (API) for NFC/RFID menu functions.
+- Integrate NFC/RFID code with new GUI/menu structure.
+
+//****************************************************************************// 
+Date: Sep 26 2025
+- Bootloader imlemented, using bank 1 and bank 2. Rollback is also implemented.
+- Improved LED driver.
+- Others
+
+//****************************************************************************//
+Date: Sep 29 2025
+- SW team's source code (from Google drive) has been integrated with the main source code
+- NFC_FCC_TEST_MODE is defined in the header file m1_compile_cfg.h to enable/disable FCC test mode
+- Bugs found:
+	+ m1_nfc.c: MX_X_USER_NFC6_CW_Process(), MX_X_USER_NFC6_MW_Process(), MX_X_USER_NFC6_Set_Power()... not found in the source code
+	+ demo_polling.c: isNFCCardRead not found in the source code.
+- Not tested yet.
+
+//****************************************************************************//
+Date: Oct 2 2025
+- New FCC test code completed. 
+- Sub-GHz Frequency Analyzer is being implemented.
+
+//****************************************************************************//
+Date: Oct 10 2025
+- New FCC test code completed. 
+- SD card insert/removal detection improvement.
+- LED indication for SD card insert/removal implemented
+- Parson JSON partially implemented.
+- Others.
+
+//****************************************************************************//
+Date: Oct 21 2025
+- SW team's source code for FCC (from Google drive) has been integrated with the main source code 
+- Saving/Reading sampling data to/from SDcard for SubGHz is being implemented.
+- Others.
+
+//****************************************************************************//
+Date: Nov 07 2025
+- Complete saving/reading sampling data to/from SDcard for SubGHz.
+- Sub-GHz replay: load a predefined-protocol data from SD card and play it. Useful for range-test and other applications.
+- Improve keypad handling.
+- Others.
+//****************************************************************************//
+Date: Nov 09 2025
+- Latest SW source code (Nov-07) is merged with the main code.
+- Writing, reading and parsing functions for RFID implemented for SW team.
+- Others.
+
+//****************************************************************************//
+Date: Nov 13 2025
+- New GUI implemented.
+- New FCC tests implemented.
+- Others.
+
+//****************************************************************************//
+Date: Nov 19 2025
+- GPIO menu implemented.
+- Bluetooth implemented
+- FCC EMC (GPIO) tests implemented.
+- Others.
+
+//****************************************************************************//
+Date: Nov 21 2025
+- Latest SW team's source code (11-21-2025) is merged.
+- Others.
+
+//****************************************************************************//
+Date: Dec 03 2025
+- Latest SW team's source code (11-28-2025) is merged.
+- Unwanted menu items removed and/or disabled
+- RFID menu names changed
+- Others.
+
+//****************************************************************************//
+Date: Dec 05 2025
+- Limit log info on UART port
+- Battery info query is implemented in a timer, instead of a task. 
+- Sub-GHz: Security+ protocol is partially implemented
+- Finalize for production.
+- Built for MP hardware.
+- Released for production. Version 0.8.0.0
+
+//****************************************************************************//
+Date: Dec 09 2025
+- Sub-GHz INTERPACKET_GAP_MIN changed from 1200us to 1500us
+- Sub-GHz PRINCETON_1 added to protocols list.
+- Backed up
+//****************************************************************************//
+Date: Dec 15 2025
+- Sub-GHz improvement to record better signal in record mode
+- Merged with SW team's latest code (Dec-15-2025)
+- IDE optimization setting changed from Optimize for size (-Os) to Optimize most (-O3) per SW team's request.
+- Others.
+
+//****************************************************************************//
+Date: Dec 18 2025
+- Production firmware release for Asia region
+- Hardware: T3-MP
+- Image file: M1_0_8_0_1P_121825_ASIA.bin
+- Version: 0.8.0.1
+- Sub-GHz Scan menu removed.
+- Infrared menu directed to "Pls update firmware"
+- Sub-GHz region: Asia
+- Sub-GHz bands: 310MHz-321.950MHZ, 915MHz-928MHz
+- Firmware update: no region restriction.
+- Others.
+
+//****************************************************************************//
+Date: Jan 08 2026
+- Production firmware release for North America region.
+- Hardware: T3-MP
+- Image file: M1_0_8_0_0P_010826_NA.bin
+- Version: 0.8.0.0
+- Final source codes from old-firm SW team (Dec-23-2025) and new SW team (Jan-02-2026) have been integrated into the main code.
+- USB MSC function is implemented.
+- Infrared menu enabled with Learn and Replay functions.
+- Sub-GHz Scan adds support for Princeton protocol (all frequencies) and Security+ V2.0. This menu is disabled.
+- Sub-GHz region: North America
+- Sub-GHz bands: 310MHz-321.950MHZ, 433.050MHz-434.790MHz, 915MHz-928MHz.
+- Firmware update: no region restriction, no version checking.
+- Others.
+
+//****************************************************************************//
+Date: Jan 09 2026
+- Production firmware release for North America region.
+- Hardware: T3-MP
+- Image file: M1_0_8_0_0P_010926_NA.bin
+- Version: 0.8.0.0
+- New source code from the SW team (Jan-09-2026) has been integrated into the main code.
+(Ship mode in power-off mode implemented, current consumption is ~65 µA)
+- Sub-GHz region: North America
+- Sub-GHz bands: 310MHz-321.950MHZ, 433.050MHz-434.790MHz, 915MHz-928MHz.
+- Firmware update: no region restriction, no version checking.
+- Others.
+
+//****************************************************************************//
+Date: Feb 04 2026
+- The code has been bugs fixed, partially optimized and restructured, cleaned.
+- Configuration files added to make the code be able to be built with Visual Studio Code.
+- Initial release for open source.
+
+//****************************************************************************//
+Date: Feb 25 2026
+- Update the latest update from the Korea SW team.
+- Update copyright information to all source files from the released open source code.
+- Fix logic bugs and other bugs found in NFC and RFID.
+- "pls update firmware" is replaced with "Coming Soon" in RFID > Utilities, NFC > Tools, Infrared > Universal Remote,
+GPIO > USB-UART.
+- Remove the "Config" submenu entirely from both the WiFi and Bluetooth menus.
+- Firmware version: bump to 8.0.0.1.
+
+//****************************************************************************//
+Date: Apr 21 2026
+- The infrared uiniversal remotes function has been completed.
+- SD card capacity report error (GB vs MB) is corrected.
+- Update the latest update for the fuel gauge golden image from the Korea SW team (Mar-31-2026).
+- The golden image functions are bug fixed, improved and optimized.
+- OK button must be pressed and hold for at least 2 seconds to power on the device.
+- The issue "After a long press the OK button to power on, it goes directly to main menu" is fixed.
+- Others.
+- Firmware version: bump to 8.0.0.2.
+
+//****************************************************************************//
+Known issues/improvements:
+- SD card VDD should be controlled by a GPIO to power cycle it in case of failure!
+To-Do:
+-  /* Configure Power Voltage Detector(PVD) to detect if battery voltage is low */
+  PVD_Config();
+- It needs a better solution to stop the m1_sdm_main_task() when sd_card_low and battery_low (m1_sdcard_manager.c)
+- Sub-GHz: Record mode at 300MHz, the device may crash if the receiver is flooded in noisy enviroment.
+- ESP32 module should be disabled after AP scan if it's not used for any other funtion.
+- [Debug: startup_bu_registers_init() in m1_system.c: if HAL_PWR_DisableBkUpAccess() is enabled, the WDT will kick in in !60 seconds!]
+- RTC enable
+- NFC: there seems to be an issue with SPI access used by st25r3916_com.c. The SPI seems to be accessed simultaneously by more than one process/task.
+If the BSP_NFC0XCOMM_SendRecv() (no mutex) is replaced by the wrapper m1_spi_hal_wrapper() with mutex, deadlock will occur when NFC Read is called.
+- After Wifi Scan, the current consumption increased by +20mA.
+
+TODO's list

@@ -4,6 +4,11 @@
 
 Firmware for the M1 NFC/RFID multi-protocol device, built on STM32H5.
 
+> **Responsible use:** Use this project only with systems and signals you own or
+> are authorized to test. Radio, credential, privacy, and access-control laws
+> vary by jurisdiction. See [Legal notice and responsible use](LEGAL.md) and
+> [Regulatory status](docs/regulatory.md).
+
 ## Overview
 
 The M1 firmware provides support for:
@@ -27,6 +32,9 @@ See [HARDWARE.md](HARDWARE.md) for more details.
 
 ## Documentation
 
+- [Technical documentation index](docs/README.md) – System, hardware, protocol,
+  testing, release, security, and known-issue documentation
+- [Build and debug](docs/build-and-debug.md) – Canonical command-line build
 - [Build Tool (mbt)](documentation/mbt.md) – Build with STM32CubeIDE or VS Code
 - [Architecture](ARCHITECTURE.md) – Project structure
 - [Development](DEVELOPMENT.md) – Development guidelines
@@ -39,19 +47,20 @@ See [HARDWARE.md](HARDWARE.md) for more details.
 
 - **STM32CubeIDE 1.17+** (recommended), or  
 - **VS Code** with ARM GCC 14.2, CMake Tools, Cortex-Debug, and Ninja, or
-- **Linux** with ARM GCC toolchain and Ninja or
-- **MacOS** with ARM GCC toolchain, CMake Tools, and Ninja
+- **Linux** with ARM GCC toolchain and Ninja
 
 ### Build steps
 
-#### Linux
+**macOS or Linux:**
 ```bash
-make
+./build.sh --release
 ```
 
-Output: `./artifacts/` (MonstaTek_M1_v0800.elf, .bin, .hex)
+This requires CMake, Ninja, GNU Arm Embedded Toolchain 14.2, and `srec_cat`.
+Output is written to `./artifacts/` (`.elf`, `.bin`, `.hex`, and a release
+manifest). A release build requires a clean Git working tree.
 
-#### #STM32CubeIDE
+**STM32CubeIDE:**  
 Open the project and build in the IDE.
 
 **VS Code:**  
@@ -59,18 +68,6 @@ Open the project and build in the IDE.
 2. Build via the Build icon  
 
 Output: `./out/build/gcc-14_2_build-release` (VS Code) or `./Release` (STM32CubeIDE)
-
-#### MacOS
-Get prerequisites
-```bash
-make setup
-```
-Build
-```bash
-make
-```
-
-Output: `./artifacts/`
 
 ## Contributing
 

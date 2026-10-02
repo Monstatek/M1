@@ -20,7 +20,7 @@
 #define ESP32_UART_BAUDRATE					115200
 #define ESP32_UART_HIGH_BAUDRATE			460800
 
-#define ESP32_UART_DISABLE
+//#define ESP32_UART_DISABLE
 #define ESP32_DATAREADY_DISABLE
 
 extern UART_HandleTypeDef huart_esp;
@@ -44,5 +44,8 @@ uint8_t m1_esp32_get_init_status(void);
 void esp32_UART_init(void);
 void esp32_UART_deinit(void);
 void esp32_UART_change_baudrate(uint32_t baudrate);
+void m1_esp32_uart_notify_ore(void);
+uint32_t m1_esp32_get_and_clear_rx_drop_count(void);
+uint32_t m1_esp32_get_and_clear_ore_count(void);
 
 #endif /* M1_ESP32_HAL_H_ */

@@ -15,7 +15,6 @@
   ******************************************************************************
   */
 
-#define BMP_TEST
 /* Includes ------------------------------------------------------------------*/
 #include "logger.h"
 #include "st_errno.h"
@@ -52,12 +51,6 @@ uint8_t hexStrIdx = 0;
   #define UART_HandleTypeDef void
 #endif
 
-/*!< Maximum Timeout values for flags waiting loops. These timeouts are not based
-   on accurate values, they just guarantee that the application will not remain
-   stuck if the UART communication is corrupted.
-   You may modify these timeout values depending on CPU frequency and application
-   conditions (interrupts routines ...). */
-#define USART_TIMEOUT          1000
 /**
   * @}
   */
@@ -73,95 +66,13 @@ uint8_t hexStrIdx = 0;
   */
 
 /* Private function prototypes -----------------------------------------------*/
-uint8_t logUsartTx(uint8_t *data, uint16_t dataLen);
 
 /* Private functions ---------------------------------------------------------*/
 /** @defgroup PTD_Logger_Private_Functions
  * @{
  */
-/**
-  *****************************************************************************
-  * @brief  This function initalize the UART handle and UART IP.
-  *
-  * @param[in,out]	husart : handle to USART HW
-  *
-  * @return None
-  *****************************************************************************
-  */
-void logUsartInit(UART_HandleTypeDef *husart)
-{
-  //husart->Instance = USART2;
-  //husart->Init.BaudRate = 115200;
-  //husart->Init.WordLength = UART_WORDLENGTH_8B;
-  //husart->Init.StopBits = UART_STOPBITS_1;
-  //husart->Init.Parity = UART_PARITY_NONE;
-  //husart->Init.Mode = UART_MODE_TX_RX;
-  //husart->Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  //husart->Init.OverSampling = UART_OVERSAMPLING_16;
-  //husart->Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
-  //husart->AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
-  //HAL_UART_Init(husart);
-  //
-  //pLogUsart = husart;
-}
 
-/**
-  *****************************************************************************
-  * @brief  This function Transmit data via USART
-  *
-  * @param[in]	data    : data to be transmitted
-  * @param[in]	dataLen : length of data to be transmitted
-  *
-  * @retval ERR_INVALID_HANDLE : in case the UART HW is not initalized yet
-  * @retval others             : HAL status
-  *****************************************************************************
-  */
-uint8_t logUsartTx(uint8_t *data, uint16_t dataLen)
-{
-	return 0;
-//  if(pLogUsart == 0)
-//    return ERR_INVALID_HANDLE;
-// #if (USE_LOGGER == LOGGER_ON)
-//  {
-//    return HAL_UART_Transmit(pLogUsart, data, dataLen, USART_TIMEOUT);
-//    }
-//  #else
-//  {
-//    return 0;
-//  }
-//  #endif /* #if USE_LOGGER == LOGGER_ON */
-}
 
-/**
-  *****************************************************************************
-  * @brief  This function is used to write a formated string via the UART interface.
-  *
-  * @param[in]	format : data to be transmitted
-  *
-  * @return Number of data sent
-  *****************************************************************************
-  */
-int logUsart(const char* format, ...)
-{
-  #if (USE_LOGGER == LOGGER_ON)
-  {
-    #define LOG_BUFFER_SIZE 256
-    char buf[LOG_BUFFER_SIZE];
-    va_list argptr;
-    va_start(argptr, format);
-    int cnt = vsnprintf(buf, LOG_BUFFER_SIZE, format, argptr);
-    va_end(argptr);
-
-    /* */
-    logUsartTx((uint8_t*)buf, strlen(buf));
-    return cnt;
-  }
-  #else
-  {
-    return 0;
-  }
-  #endif /* #if USE_LOGGER == LOGGER_ON */
-}
 
 /**
   *****************************************************************************

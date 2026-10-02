@@ -36,8 +36,12 @@
 
 #define FW_VERSION_MAJOR   			0
 #define FW_VERSION_MINOR   			8
-#define FW_VERSION_BUILD   			0
-#define FW_VERSION_RC   			2
+#define FW_VERSION_BUILD   			1
+#define FW_VERSION_RC   			0
+
+/* About-box/version-log label, drawn directly with u8g2_DrawStr().
+ * The label must fit the display width at ABOUT_BOX_Y_POS_ROW_4. */
+#define FW_BUILD_LABEL				"FW 0.8.1.0"
 
 #define FW_CONFIG_MAGIC_NUMBER_1	((uint32_t)0x4D493235)
 #define FW_CONFIG_MAGIC_NUMBER_2    ((uint32_t)0x534A1F41)
@@ -117,6 +121,37 @@ uint16_t bl_get_active_bank(void);
 uint8_t bl_crc_check(uint32_t image_size);
 void bl_swap_banks(void);
 void fw_gui_progress_update(size_t remainder);
+
+/* Streamed programming wrappers (M1CP firmware-update path). These reuse the
+ * exact SD-path engine (bl_flash_if_init/bl_flash_start/bl_flash_binary/
+ * bl_flash_if_deinit) in the same order, driven by streamed chunks instead of a
+ * file. Sequence: begin(image_size) [erases inactive bank] -> write(chunk)... ->
+ * finish() [runs bl_crc_check over the programmed image vs the embedded CRC].
+ * All chunks except the final one must be a multiple of 16 bytes (quadword).
+ * Return BL_CODE_OK on success. No bank swap here; activation is separate
+ * (bl_swap_banks). Task context only. */
+uint8_t bl_flash_stream_begin(uint32_t image_size);
+uint8_t bl_flash_stream_write(uint8_t *payload, uint32_t size);
+uint8_t bl_flash_stream_finish(void);
+
+/* Force bl_flash_binary()'s internal write cursor (previously a set of
+ * function-local statics that only ever cleared themselves on a SUCCESSFUL
+ * finish) back to its pre-BEGIN state. Call this from both
+ * bl_flash_stream_begin() and any abort path -- without it, a BEGIN issued
+ * after a transfer that was aborted or that failed before FINISH resumes
+ * writing at the STALE mid-image cursor from the abandoned attempt, into a
+ * freshly-erased bank, producing a corrupt image at the wrong offset. The
+ * SD-card path (bl_flash_app) never hits this because it always runs one
+ * uninterrupted begin->write*->finish sequence per call; only the M1CP
+ * streamed path (which can BEGIN again after an abort) can. */
+void bl_flash_stream_reset(void);
+
+/* bl_flash_stream_reset() + re-lock flash (HAL_FLASH_Lock, via the same
+ * private path bl_flash_stream_finish() already uses on success). Call this
+ * on any exit that ISN'T a successful finish() -- an abort, a cancel, or a
+ * begin()/write() failure -- so flash never stays unlocked and the cursor
+ * never stays stale across a fresh begin(). Task context only. */
+void bl_flash_stream_abort(void);
 
 extern FW_CFG_SECTION S_M1_FW_CONFIG_t m1_fw_config;
 

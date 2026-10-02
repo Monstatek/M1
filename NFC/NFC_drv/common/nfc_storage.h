@@ -27,7 +27,7 @@ typedef enum {
  * - Header: Filetype, Version, Device type, UID, ATQA, SAK, ATS, etc.
  * - Body: "Page N:", "Block N:" lines → stored in dump buffer
  *
- * @param path Full path on SD card (e.g., "/NFC/card1.nfc")
+ * @param path Full path on SD card (e.g., "/nfc/card1.nfc")
  * @param dump_buf Workspace pointer to store dump data
  * @param dump_buf_bytes Total size of dump_buf (in bytes)
  * @param valid_bits Unit validity bitmap (optional, NULL allowed)
@@ -47,6 +47,14 @@ nfc_storage_result_t nfc_storage_load_file(
         uint8_t*    valid_bits,
         uint32_t    valid_bits_bytes);
 
+/* Canonical file-format name for a T2T variant ("UL", "NTAG216", ...), or
+ * NULL for M1NFC_T2TVAR_UNKNOWN / an out-of-range value. Used by
+ * nfc_file.c's writer for the "T2T Variant:" line and internally by the
+ * parser's name->enum lookup -- the single source of truth for both
+ * directions, so the name a file is saved with is always exactly the name
+ * that reloads back to the same variant. */
+const char *nfc_t2t_variant_name(uint8_t variant);
+
 
 
 /*  Storage file text line format (M1 NFC device)
@@ -59,10 +67,31 @@ nfc_storage_result_t nfc_storage_load_file(
  *  SAK: 00              # If Tech A
  *  ATS:  78 77 ...      # If 4A
  *
- *  # Type 2 (Ultralight/NTAG)
- *  Page 0:  xx xx xx xx
- *  Page 1:  xx xx xx xx
- *  ...
+ *  # Type 2 (Ultralight/NTAG) -- "Version:" above is this FILE FORMAT's own
+ *  # version (always "4"); "T2T Version:" below is the tag's raw GET_VERSION
+ *  # reply -- the two must never be confused.
+ *  T2T Variant: NTAG216            # explicit, canonical name (see
+ *                                  # nfc_t2t_variant_name()); absent for a
+ *                                  # tag that was never identified
+ *  T2T Version: 00 04 04 02 01 00 13 03   # raw 8-byte GET_VERSION tuple;
+ *                                  # absent if never captured (UL/ULC/
+ *                                  # NTAG203 predate this command, or the
+ *                                  # tag NAK'd it)
+ *  Pages: 231                      # DECLARED/EXPECTED total for the
+ *                                  # variant above -- NOT re-derived from
+ *                                  # how many Page lines follow
+ *  Signature: <64 hex chars>       # genuine READ_SIGNATURE bytes; absent
+ *                                  # if never captured
+ *  Counter0: <6 hex chars>         # genuine READ_CNT bytes, per index
+ *  Counter1: ...
+ *  Counter2: ...
+ *  Tearing0: <2 hex chars>         # genuine CHECK_TEARING byte, per index
+ *  Tearing1: ...
+ *  Tearing2: ...
+ *  Page 0:  xx xx xx xx            # present only for an actually-read
+ *  Page 1:  xx xx xx xx            # page -- a gap in the numbering means
+ *  ...                             # that page was never captured, never
+ *                                  # a zero-filled placeholder
  *
  *  # Classic
  *  Mifare Classic type: 1K

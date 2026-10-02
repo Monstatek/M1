@@ -91,5 +91,41 @@
 #define GetPrivateProfileInt 		get_private_profile_int
 #define GetPrivateProfileString 	get_private_profile_string
 #define WritePrivateProfileString 	write_private_profile_string
+
+ /* ================================
+  *  Batched (session) reads
+  * ================================
+  * A caller that needs several keys out of the SAME file (e.g. a header
+  * with a dozen optional fields) can open it once, look up every key
+  * against that one open handle (each lookup still does its own linear
+  * scan from the top -- same semantics as get_private_profile(), just
+  * without a repeated f_open/f_close per key), then close once. This
+  * turns N independent open+scan+close cycles into 1 open + N scans + 1
+  * close. Every existing single-shot GetPrivateProfileXxx() call is
+  * unaffected -- this is purely additive. */
+ typedef struct {
+     FIL  fp;
+     bool is_open;
+ } ProfileSession;
+
+ bool profile_session_open(ProfileSession *sess, const char *file_name);
+ void profile_session_close(ProfileSession *sess);
+
+ bool isValidHeaderFieldSession(ParsedValue *data, const char* filetype, const char* version, ProfileSession *sess);
+ int get_private_profile_session_string(ParsedValue *val, const char *entry, ProfileSession *sess);
+ int get_private_profile_session_hex(ParsedValue *val, const char *entry, ProfileSession *sess);
+ int get_private_profile_session_uint(ParsedValue *val, const char *entry, ProfileSession *sess);
+
+#define GetPrivateProfileStringS	get_private_profile_session_string
+#define GetPrivateProfileHexS		get_private_profile_session_hex
+#define GetPrivateProfileUintS		get_private_profile_session_uint
+
+ /* Purely-additive counter: real f_open() calls made by this module (one
+  * per single-shot GetPrivateProfileXxx() call, one per profile_session_open()
+  * regardless of how many keys are then read through it). Surfaced via
+  * "m1_mtest 5" alongside the file-browser perf counters, so a hardware
+  * tester can directly see the reduction a session conversion produces. */
+ uint32_t get_private_profile_open_count(void);
+ void reset_private_profile_open_count(void);
 #endif
   

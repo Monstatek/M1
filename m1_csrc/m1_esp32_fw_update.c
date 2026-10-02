@@ -22,9 +22,12 @@
 #include "stm32_port.h"
 #include "esp_loader.h"
 #include "app_common.h"
+#include "m1_esp32_flash_session.h"
 #include "m1_storage.h"
+#include "m1_file_browser.h"   /* m1_fb_set_sort_enabled (folders-first picker) */
 #include "m1_md5_hash.h"
 #include "m1_fw_update_bl.h"
+#include "m1_esp_version.h"   /* installed Core version for the update screen */
 #include "m1_power_ctl.h"
 
 /*************************** D E F I N E S ************************************/
@@ -95,15 +98,22 @@ static uint16_t esp32_get_boot_info(uint8_t *boot_msg, uint16_t boot_msg_len, ui
 /******************************************************************************/
 void setting_esp32_init(void)
 {
+	/* assert() compiles out under NDEBUG (this project's real ARM release
+	 * build passes -DNDEBUG -- confirmed via compile_commands.json), so it
+	 * was never a real safety net here. This runs whenever the user enters
+	 * the ESP32 update settings screen (not boot-time); on a failed
+	 * allocation, leave esp32_update_status at NOT_READY (already the
+	 * fall-through value below) and bail out before anything downstream
+	 * gets a chance to use a NULL pfullpath/pfilename_md5. */
 	if ( !pfullpath )
 		pfullpath = malloc(ESP_FILE_PATH_LEN_MAX + ESP_FILE_NAME_LEN_MAX);
-	assert(pfullpath!=NULL);
 	if ( !pfilename_md5 )
 		pfilename_md5 = malloc(ESP_FILE_NAME_LEN_MAX);
-	assert(pfilename_md5!=NULL);
+	esp32_update_status = M1_FW_UPDATE_NOT_READY; // Reset
+	if ( (pfullpath == NULL) || (pfilename_md5 == NULL) )
+		return;
 
 	start_address = ESP32_START_ADDRESS_MIN;
-	esp32_update_status = M1_FW_UPDATE_NOT_READY; // Reset
 } // void setting_esp32_init(void)
 
 
@@ -197,6 +207,7 @@ void setting_esp32_image_file(void)
     uint8_t hex_md5_infile[MAX(MD5_SIZE_ROM, MD5_SIZE_STUB) + 1] = {0};
     size_t count, sum;
 
+	m1_fb_set_sort_enabled(true);   /* folders first, then files (auto-cleared on deinit) */
 	f_info = storage_browse();
 
 	esp32_update_status = M1_FW_IMAGE_FILE_TYPE_ERROR; // reset
@@ -245,12 +256,23 @@ void setting_esp32_image_file(void)
         	break;
         }
 
-		u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_BG); // set to background color
-		// Draw box with background color to clear the area for the hourglass icon
-		u8g2_DrawBox(&m1_u8g2, M1_LCD_DISPLAY_WIDTH - 28, THIS_LCD_MENU_TEXT_FIRST_ROW_Y + THIS_LCD_MENU_TEXT_ROW_SPACE + 2, 24, THIS_LCD_MENU_TEXT_ROW_SPACE);
-		u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_TXT); // return to text color
-    	u8g2_DrawXBMP(&m1_u8g2, M1_LCD_DISPLAY_WIDTH - 24, 16, 18, 32, hourglass_18x32); // Draw icon
-    	m1_u8g2_nextpage(); // Update display RAM
+        /* "Preparing..." wait screen while the MD5-file read + checksum over the
+         * full ~1 MB image below runs (a few seconds). Clear the file-browser
+         * screen behind us, then show the hourglass centered above a centered
+         * label -- no frame box. Display-only; flash transport unchanged.
+         * Restores the indicator removed in f6685f8b, reworded. */
+        {
+            const char *prep_msg = "Preparing...";
+            int prep_w;
+            u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_BG);
+            u8g2_DrawBox(&m1_u8g2, 0, 0, 128, 64);
+            u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_TXT);
+            u8g2_DrawXBMP(&m1_u8g2, (128 - 16) / 2, 10, 16, 29, hourglass_16x29);
+            u8g2_SetFont(&m1_u8g2, M1_DISP_SUB_MENU_FONT_N);
+            prep_w = (int)u8g2_GetStrWidth(&m1_u8g2, prep_msg);
+            u8g2_DrawStr(&m1_u8g2, (128 - prep_w) / 2, 52, prep_msg);
+            m1_u8g2_nextpage();
+        }
 
         m1_fb_dyn_strcat(pfullpath, 2, "",  f_info->dir_name, pfilename_md5);
         uret = m1_fb_open_file(&hfile_fw, pfullpath);
@@ -401,7 +423,14 @@ void setting_esp32_firmware_update(void)
 
         m1_led_fw_update_on(NULL); // Turn on
 		esp32_UART_deinit(); // Disable the ESP32 module first
+        /* Keep loss counters scoped to this attempt, before teardown. */
+        (void)m1_esp32_get_and_clear_rx_drop_count();
+        (void)m1_esp32_get_and_clear_ore_count();
     	uret = m1_fw_app(&hfile_fw);
+        printf("[ESP-R1] result=%u ringbuffer_drops=%lu uart_overruns=%lu\r\n",
+               (unsigned)uret,
+               (unsigned long)m1_esp32_get_and_clear_rx_drop_count(),
+               (unsigned long)m1_esp32_get_and_clear_ore_count());
 		if ( uret != ESP_LOADER_SUCCESS )
 		{
 			uret = M1_FW_UPDATE_FAILED;
@@ -418,15 +447,15 @@ void setting_esp32_firmware_update(void)
 
 	if ( (uret==M1_FW_UPDATE_SUCCESS) || (uret==M1_FW_UPDATE_FAILED) )
 	{
-		esp32_UART_change_baudrate(ESP32_UART_BAUDRATE); // Change to ESP32 default baud rate
-		m1_ringbuffer_reset(&esp32_rb_hdl);
-		esp_loader_reset_target(); // Reset ESP32 to get the boot message
-
-		// Delay for skipping the boot message of the targets
-		HAL_Delay(100);
-		esp32_UART_deinit(); // Disable UART GPIO after update process is done
+		/* IO9 was already restored to input inside m1_fw_app(); this is the
+		 * rest of teardown only. */
+		m1_esp32_flash_session_teardown(false, ESP32_IO9_GPIO_Port, ESP32_IO9_Pin);
 	} // if ( (uret==M1_FW_UPDATE_FAILED) || (uret==M1_FW_UPDATE_SUCCESS) )
 
+	// Restart the backlight timeout so the result screen stays lit for a full
+	// LCD_SAVER_PERIOD. Set before op_mode is restored, while the saver is
+	// still suspended.
+	m1_device_stat.active_timestamp = HAL_GetTick();
 	m1_device_stat.op_mode = old_op_mode;
 
     xQueueReset(main_q_hdl); // Reset main q before return
@@ -443,37 +472,25 @@ void setting_esp32_firmware_update(void)
 /******************************************************************************/
 static esp_loader_error_t m1_fw_app(FIL *hfile)
 {
-	GPIO_InitTypeDef GPIO_InitStruct = {0};
 	esp_loader_error_t flash_err;
 	size_t write_size, count;
     uint8_t buffer[ESP32_IMAGE_CHUNK_SIZE];
 
-	loader_stm32_config_t config = {
-		.huart = &huart_esp,
-	    .port_io0 = ESP32_IO9_GPIO_Port,
-	    .pin_num_io0 = ESP32_IO9_Pin,
-	    .port_rst = ESP32_RESET_GPIO_Port,
-	    .pin_num_rst = ESP32_RESET_Pin,
+	const m1_esp32_flash_session_pins_t pins = {
+		.huart    = &huart_esp,
+	    .io0_port = ESP32_IO9_GPIO_Port,
+	    .io0_pin  = ESP32_IO9_Pin,
+	    .rst_port = ESP32_RESET_GPIO_Port,
+	    .rst_pin  = ESP32_RESET_Pin,
 	};
 
 	write_size = image_size;
 	fw_gui_progress_update(write_size);
 
-	loader_port_stm32_init(&config);
-	esp32_UART_init();
-
-	// Configure the BUTTON_RIGHT to become an output pin
-	// This GPIO is shared with the ESP32 boot-mode pin
-	GPIO_InitStruct.Pin = ESP32_IO9_Pin;
-	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-	GPIO_InitStruct.Pull = GPIO_NOPULL;
-	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-	HAL_GPIO_Init(ESP32_IO9_GPIO_Port, &GPIO_InitStruct);
-
-	HAL_GPIO_WritePin(ESP32_IO9_GPIO_Port, ESP32_IO9_Pin, GPIO_PIN_SET);
+	m1_esp32_flash_session_setup_io(&pins);
 
 	flash_err = ESP_LOADER_ERROR_FAIL;
-	while (connect_to_target(ESP32_UART_HIGH_BAUDRATE)==ESP_LOADER_SUCCESS)
+	while (m1_esp32_flash_session_connect()==ESP_LOADER_SUCCESS)
 	{
 		f_lseek(hfile, 0); // Move file pointer to the beginning of the file
 		//write_size = image_size;
@@ -498,14 +515,9 @@ static esp_loader_error_t m1_fw_app(FIL *hfile)
 		// Last step to verify MD5
 		flash_err = m1_fw_flash_binary(NULL, 0);
 	    break;
-	} // while (connect_to_target(ESP32_UART_BAUDRATE) == ESP_LOADER_SUCCESS)
+	} // while (m1_esp32_flash_session_connect() == ESP_LOADER_SUCCESS)
 
-	// Configure the BUTTON_RIGHT to input again
-	GPIO_InitStruct.Pin = ESP32_IO9_Pin;
-	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-	GPIO_InitStruct.Pull = GPIO_NOPULL;
-	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-	HAL_GPIO_Init(ESP32_IO9_GPIO_Port, &GPIO_InitStruct);
+	m1_esp32_flash_session_restore_io0_input(ESP32_IO9_GPIO_Port, ESP32_IO9_Pin);
 
 	return flash_err;
 } // static esp_loader_error_t m1_fw_app(FIL *hfile)
@@ -528,7 +540,7 @@ static esp_loader_error_t m1_fw_flash_binary(uint8_t *payload, size_t size)
     if ( !init_done )
     {
         printf("Erasing flash (this may take a while)...\r\n");
-        err = esp_loader_flash_start(start_address, image_size, ESP32_IMAGE_CHUNK_SIZE);
+        err = m1_esp32_flash_session_start(start_address, image_size, ESP32_IMAGE_CHUNK_SIZE);
         if (err != ESP_LOADER_SUCCESS)
         {
             printf("Erasing flash failed with error: %s.\r\n", get_error_string(err));
@@ -546,7 +558,7 @@ static esp_loader_error_t m1_fw_flash_binary(uint8_t *payload, size_t size)
 
     if ( size )
     {
-        err = esp_loader_flash_write(payload, size);
+        err = m1_esp32_flash_session_write(payload, size);
         if (err != ESP_LOADER_SUCCESS)
         {
             printf("\nPacket could not be written! Error %s.\r\n", get_error_string(err));
@@ -565,7 +577,7 @@ static esp_loader_error_t m1_fw_flash_binary(uint8_t *payload, size_t size)
     init_done = false; // reset
 
 #ifdef MD5_ENABLED
-    err = esp_loader_flash_verify();
+    err = m1_esp32_flash_session_verify_self();
     if (err == ESP_LOADER_ERROR_UNSUPPORTED_FUNC)
     {
         printf("ESP8266 does not support flash verify command.\r\n");
@@ -656,14 +668,14 @@ void setting_esp32_gui_update(const S_M1_Menu_t *phmenu, uint8_t sel_item)
     	{
     		if ( i==sel_item )
     		{
-    			// Draw box for selected menu item with text color
-    			u8g2_DrawBox(&m1_u8g2, 0, menu_text_y - THIS_LCD_MENU_TEXT_ROW_SPACE + 2, M1_LCD_SUB_MENU_TEXT_FRAME_W, THIS_LCD_MENU_TEXT_ROW_SPACE);
+    			// Selected item: full-width black band with white text, consistent with the other menus.
+    			u8g2_DrawBox(&m1_u8g2, 0, menu_text_y - THIS_LCD_MENU_TEXT_ROW_SPACE + 2, M1_LCD_DISPLAY_WIDTH, THIS_LCD_MENU_TEXT_ROW_SPACE);
     			u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_BG); // set to background color
     			u8g2_SetFont(&m1_u8g2, M1_DISP_SUB_MENU_FONT_B);
     			u8g2_DrawStr(&m1_u8g2, 4, menu_text_y, phmenu->submenu[i]->title);
     			if ( i==1 ) // Index of the Start Address field
     			{
-    		    	// Draw arrows left and right
+    		    	// Draw arrows left and right (white, on the selection band)
     		    	u8g2_DrawXBMP(&m1_u8g2, M1_LCD_DISPLAY_WIDTH - 40, THIS_LCD_MENU_TEXT_FIRST_ROW_Y + 2, 10, 10, arrowleft_10x10);
     		    	u8g2_DrawXBMP(&m1_u8g2, M1_LCD_DISPLAY_WIDTH - 20, THIS_LCD_MENU_TEXT_FIRST_ROW_Y + 2, 10, 10, arrowright_10x10);
     			}
@@ -677,8 +689,30 @@ void setting_esp32_gui_update(const S_M1_Menu_t *phmenu, uint8_t sel_item)
     		menu_text_y += THIS_LCD_MENU_TEXT_ROW_SPACE;
     	} // for (i=0; i<n_items; i++)
 
-    	// Draw info box at the bottom
-    	m1_info_box_display_init(true);
+        /* Draw the status frame only when a status message is present. */
+        /* Idle (no file selected yet): show the installed firmware versions
+         * from authoritative runtime/stored values (not hard-coded). Core is
+         * independently versioned; show the concise product version, or an
+         * honest unavailable state when it is not known. */
+        if ( esp32_update_status == M1_FW_UPDATE_NOT_READY )
+        {
+            uint8_t ev[4];
+            m1_info_box_display_init(true);
+            sprintf((char *)prn_name, "STM32 %u.%u.%u.%u",
+                    m1_device_stat.config.fw_version_major, m1_device_stat.config.fw_version_minor,
+                    m1_device_stat.config.fw_version_build, m1_device_stat.config.fw_version_rc);
+            m1_info_box_display_draw(INFO_BOX_ROW_1, prn_name);
+            /* Core is independently versioned. Show the line only when an
+             * authoritative value is recorded (set by a Web-Manager ESP update);
+             * when unknown, omit it entirely rather than show a status that reads
+             * like a fault. Never hard-coded, never shown as the STM32 version. */
+            if ( m1cp_esp_version_get(ev) )
+            {
+                sprintf((char *)prn_name, "Core %u.%u", ev[0], ev[1]);
+                m1_info_box_display_draw(INFO_BOX_ROW_2, prn_name);
+            }
+        }
+
 
     	switch ( sel_item )
     	{
@@ -700,27 +734,33 @@ void setting_esp32_gui_update(const S_M1_Menu_t *phmenu, uint8_t sel_item)
     			switch ( esp32_update_status )
     			{
     				case M1_FW_UPDATE_READY:
+                        m1_info_box_display_init(true);
     					m1_info_box_display_draw(INFO_BOX_ROW_1, prn_name);
     					break;
 
     				case M1_FW_IMAGE_FILE_ACCESS_ERROR:
+                        m1_info_box_display_init(true);
     					m1_info_box_display_draw(INFO_BOX_ROW_1, "Image file error!");
     					break;
 
     				case M1_FW_CRC_FILE_ACCESS_ERROR:
+                        m1_info_box_display_init(true);
     					m1_info_box_display_draw(INFO_BOX_ROW_1, "MD5 file error!");
     					break;
 
     				case M1_FW_CRC_FILE_INVALID:
+                        m1_info_box_display_init(true);
 		    			m1_info_box_display_draw(INFO_BOX_ROW_1, "Invalid MD5 file!");
 						break;
 
     				case M1_FW_IMAGE_FILE_TYPE_ERROR:
     				case M1_FW_IMAGE_SIZE_INVALID:
+                        m1_info_box_display_init(true);
 		    			m1_info_box_display_draw(INFO_BOX_ROW_1, "Invalid image file!");
 		    			break;
 
 		    		case M1_FW_CRC_CHECKSUM_UNMATCHED:
+                        m1_info_box_display_init(true);
 		    			m1_info_box_display_draw(INFO_BOX_ROW_1, "Checksum failed!");
 		    			break;
 
@@ -731,6 +771,7 @@ void setting_esp32_gui_update(const S_M1_Menu_t *phmenu, uint8_t sel_item)
 
     		case 1: // Start address
     	    	sprintf(prn_name, "0x%06lX:", start_address);
+                m1_info_box_display_init(true);
     	    	m1_info_box_display_draw(INFO_BOX_ROW_1, prn_name);
     			break;
 
@@ -738,11 +779,13 @@ void setting_esp32_gui_update(const S_M1_Menu_t *phmenu, uint8_t sel_item)
     			switch ( esp32_update_status )
     			{
     				case M1_FW_UPDATE_READY:
+                        m1_info_box_display_init(true);
     					m1_info_box_display_draw(INFO_BOX_ROW_1, "Ready to flash!");
     					break;
 
 		    		case M1_FW_UPDATE_SUCCESS:
-		    			m1_info_box_display_draw(INFO_BOX_ROW_1, "Update successfully!");
+                        m1_info_box_display_init(true);
+		    			m1_info_box_display_draw(INFO_BOX_ROW_1, "Update successful!");
 		    			esp32_update_status = M1_FW_UPDATE_NOT_READY; // Reset after process complete
 		    			i = 0;
 		    			msg_len = m1_ringbuffer_get_read_len(&esp32_rb_hdl);
@@ -776,10 +819,12 @@ void setting_esp32_gui_update(const S_M1_Menu_t *phmenu, uint8_t sel_item)
 		    			break;
 
 		    		case M1_FW_UPDATE_FAILED:
+                        m1_info_box_display_init(true);
 		    	    	m1_info_box_display_draw(INFO_BOX_ROW_1, "Update failed!");
 		    			break;
 
 		    		case M1_FW_UPDATE_LOW_BATTERY:
+                        m1_info_box_display_init(true);
 		    			m1_info_box_display_draw(INFO_BOX_ROW_1, "Battery level < 50%!");
 		    			break;
 

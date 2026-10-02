@@ -3,13 +3,6 @@
 /*
  * LF RFID (125 kHz) implementation
  *
- * Portions of the data structure definitions and table-driven
- * architecture were adapted from the Flipper Zero firmware project.
- *
- * Original project:
- * https://github.com/flipperdevices/flipperzero-firmware
- *
- * Copyright (C) Flipper Devices Inc.
  * Licensed under the GNU General Public License v3.0 (GPLv3).
  *
  * Modifications and additional implementation:
@@ -42,12 +35,53 @@
 
 //LFRFIDProtocol ProtocolID = -1;
 
-const LFRFIDProtocolBase* lfrfid_protocols[] = {
+/*
+ * Explicitly sized [LFRFIDProtocolMax], NOT compiler-inferred from the
+ * highest designated initializer present. This is a hard requirement, not
+ * style: LFRFIDProtocolNexwatch exists unconditionally in the enum (its
+ * numeric ID must never shift between build configurations), but its
+ * registry entry below is conditionally compiled out when the NexWatch
+ * decoder isn't built. Without an explicit size, the compiler would infer
+ * the array's length from the highest initializer index ACTUALLY PRESENT
+ * -- one element short of LFRFIDProtocolMax whenever the last enum slot's
+ * entry is disabled -- while every LFRFIDProtocolMax-bounded loop in this
+ * codebase (lfrfid_decoder_begin() foremost) still iterates the full
+ * count. That mismatch was a real, hardware-reproduced bug: the phantom
+ * final iteration read whatever global happened to be linked immediately
+ * after this array, misinterpreted it as a protocol descriptor, and
+ * branched through it. See fix/lfrfid-psk-entry-crash for the full
+ * root-cause trace. The explicit size below guarantees every slot from
+ * 0..LFRFIDProtocolMax-1 exists and is zero/NULL-initialized unless a
+ * registry entry explicitly populates it -- exactly the guarantee every
+ * consumer in this file, lfrfid.c and lfrfid_file.c already assumes.
+ */
+const LFRFIDProtocolBase* lfrfid_protocols[LFRFIDProtocolMax] = {
     [LFRFIDProtocolEM4100] = &protocol_em4100,
     [LFRFIDProtocolEM4100_32] = &protocol_em4100_32,
     [LFRFIDProtocolEM4100_16] = &protocol_em4100_16,
     [LFRFIDProtocolH10301] = &protocol_h10301,
+    [LFRFIDProtocolPyramid] = &protocol_pyramid,
+    [LFRFIDProtocolIoProxXSF] = &protocol_ioprox,
+    [LFRFIDProtocolAWID] = &protocol_awid,
+    [LFRFIDProtocolRadioKey] = &protocol_radiokey,
+    [LFRFIDProtocolJablotron] = &protocol_jablotron,
+    [LFRFIDProtocolFDXB] = &protocol_fdx_b,
+    [LFRFIDProtocolHIDProx] = &protocol_hid_generic,
+    [LFRFIDProtocolHIDExt] = &protocol_hid_ex_generic,
+    [LFRFIDProtocolKeri] = &protocol_keri,
+#if defined(LFRFID_NEXWATCH_ENABLED)
+    [LFRFIDProtocolNexwatch] = &protocol_nexwatch,
+#endif
 };
+
+/* Compile-time invariant: catches any future regression back to an
+ * implicitly-sized array (or a new enum entry added without a
+ * corresponding registry slot) at build time instead of at runtime on
+ * hardware. */
+_Static_assert(
+    (sizeof(lfrfid_protocols) / sizeof(lfrfid_protocols[0])) == LFRFIDProtocolMax,
+    "lfrfid_protocols[] length must equal LFRFIDProtocolMax"
+);
 
 //************************** S T R U C T U R E S *******************************
 
@@ -74,6 +108,23 @@ void lfrfid_decoder_begin(void)
 			if(lfrfid_protocols[i]->decoder.begin)
 				lfrfid_protocols[i]->decoder.begin(NULL);
 	}
+}
+
+
+/*============================================================================*/
+/**
+  * @brief Reset a single decoder's state via its begin() hook. Clears all
+  *        frame/state buffers so the next successful decode must consume a new
+  *        complete frame. The begin() hooks ignore their argument and touch
+  *        only static decoder state (no RF hardware, no allocation).
+  */
+/*============================================================================*/
+void lfrfid_decoder_reset(uint16_t protocol_index)
+{
+	if(protocol_index < LFRFIDProtocolMax)
+		if(lfrfid_protocols[protocol_index])
+			if(lfrfid_protocols[protocol_index]->decoder.begin)
+				lfrfid_protocols[protocol_index]->decoder.begin(NULL);
 }
 
 
@@ -261,13 +312,15 @@ const char* protocol_get_manufacturer(uint16_t protocol_index)
 /*============================================================================*/
 void protocol_render_data(uint16_t protocol_index, char* szstring)
 {
+	if(!szstring)
+		return;
+	szstring[0] = '\0';
 	if(protocol_index < LFRFIDProtocolMax)
 	{
 		if(lfrfid_protocols[protocol_index])
 			if(lfrfid_protocols[protocol_index]->render_data)
 				return lfrfid_protocols[protocol_index]->render_data(NULL,szstring);
 	}
-	(szstring = NULL);
 }
 
 
@@ -280,7 +333,7 @@ void protocol_render_data(uint16_t protocol_index, char* szstring)
 /*============================================================================*/
 void lfrfid_GetTagInfo(PLFRFID_TAG_INFO pTaginfo)
 {
-	memcpy(pTaginfo->uid, lfrfid_tag_info.uid,5);
+	memcpy(pTaginfo->uid, lfrfid_tag_info.uid, sizeof(pTaginfo->uid));
 	pTaginfo->bitrate = lfrfid_tag_info.bitrate;
 	pTaginfo->protocol = lfrfid_tag_info.protocol;
 }
@@ -322,4 +375,3 @@ bool lfrfid_write_verify(LFRFID_TAG_INFO* write, LFRFID_TAG_INFO* readback)
 
 	return result;
 }
-

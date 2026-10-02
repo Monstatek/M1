@@ -55,6 +55,9 @@
 - "stm32xxxxx_{eval}{discovery}_io.c"
 EndBSPDependencies */
 
+#pragma GCC push_options
+#pragma GCC optimize("O0")
+
 /* Includes ------------------------------------------------------------------*/
 #include "usbd_cdc.h"
 #include "usbd_ctlreq.h"
@@ -215,7 +218,8 @@ __ALIGN_BEGIN static uint8_t USBD_CDC_CfgDesc[USB_CDC_CONFIG_DESC_SIZ] __ALIGN_E
   0x04,                                       /* bFunctionLength */
   0x24,                                       /* bDescriptorType: CS_INTERFACE */
   0x02,                                       /* bDescriptorSubtype: Abstract Control Management desc */
-  0x02,                                       /* bmCapabilities */
+  //0x02,                                       /* bmCapabilities */
+  0x06,                                       /* bmCapabilities 0x02 [Control Line] + 0x04 [Line Coding]*/
 
   /* Union Functional Descriptor */
   0x05,                                       /* bFunctionLength */
@@ -788,6 +792,22 @@ uint8_t USBD_CDC_SetTxBuffer(USBD_HandleTypeDef *pdev,
   * @param  pbuff: Rx Buffer
   * @retval status
   */
+/* Composite variant uses explicit ClassId to avoid global pdev->classId races. */
+#ifdef USE_USBD_COMPOSITE
+uint8_t USBD_CDC_SetRxBuffer(USBD_HandleTypeDef *pdev, uint8_t *pbuff, uint8_t ClassId)
+{
+  USBD_CDC_HandleTypeDef *hcdc = (USBD_CDC_HandleTypeDef *)pdev->pClassDataCmsit[ClassId];
+
+  if (hcdc == NULL)
+  {
+    return (uint8_t)USBD_FAIL;
+  }
+
+  hcdc->RxBuffer = pbuff;
+
+  return (uint8_t)USBD_OK;
+}
+#else
 uint8_t USBD_CDC_SetRxBuffer(USBD_HandleTypeDef *pdev, uint8_t *pbuff)
 {
   USBD_CDC_HandleTypeDef *hcdc = (USBD_CDC_HandleTypeDef *)pdev->pClassDataCmsit[pdev->classId];
@@ -801,6 +821,7 @@ uint8_t USBD_CDC_SetRxBuffer(USBD_HandleTypeDef *pdev, uint8_t *pbuff)
 
   return (uint8_t)USBD_OK;
 }
+#endif /* USE_USBD_COMPOSITE */
 
 
 /**
@@ -855,14 +876,38 @@ uint8_t USBD_CDC_TransmitPacket(USBD_HandleTypeDef *pdev)
   * @param  pdev: device instance
   * @retval status
   */
+#ifdef USE_USBD_COMPOSITE
+uint8_t USBD_CDC_ReceivePacket(USBD_HandleTypeDef *pdev, uint8_t ClassId)
+{
+  USBD_CDC_HandleTypeDef *hcdc = (USBD_CDC_HandleTypeDef *)pdev->pClassDataCmsit[ClassId];
+
+  /* Get the Endpoints addresses allocated for this class instance */
+  CDCOutEpAdd = USBD_CoreGetEPAdd(pdev, USBD_EP_OUT, USBD_EP_TYPE_BULK, ClassId);
+
+  if (hcdc == NULL)
+  {
+    return (uint8_t)USBD_FAIL;
+  }
+
+  if (pdev->dev_speed == USBD_SPEED_HIGH)
+  {
+    /* Prepare Out endpoint to receive next packet */
+    (void)USBD_LL_PrepareReceive(pdev, CDCOutEpAdd, hcdc->RxBuffer,
+                                 CDC_DATA_HS_OUT_PACKET_SIZE);
+  }
+  else
+  {
+    /* Prepare Out endpoint to receive next packet */
+    (void)USBD_LL_PrepareReceive(pdev, CDCOutEpAdd, hcdc->RxBuffer,
+                                 CDC_DATA_FS_OUT_PACKET_SIZE);
+  }
+
+  return (uint8_t)USBD_OK;
+}
+#else
 uint8_t USBD_CDC_ReceivePacket(USBD_HandleTypeDef *pdev)
 {
   USBD_CDC_HandleTypeDef *hcdc = (USBD_CDC_HandleTypeDef *)pdev->pClassDataCmsit[pdev->classId];
-
-#ifdef USE_USBD_COMPOSITE
-  /* Get the Endpoints addresses allocated for this class instance */
-  CDCOutEpAdd = USBD_CoreGetEPAdd(pdev, USBD_EP_OUT, USBD_EP_TYPE_BULK, (uint8_t)pdev->classId);
-#endif /* USE_USBD_COMPOSITE */
 
   if (pdev->pClassDataCmsit[pdev->classId] == NULL)
   {
@@ -884,6 +929,7 @@ uint8_t USBD_CDC_ReceivePacket(USBD_HandleTypeDef *pdev)
 
   return (uint8_t)USBD_OK;
 }
+#endif /* USE_USBD_COMPOSITE */
 /**
   * @}
   */
@@ -895,4 +941,6 @@ uint8_t USBD_CDC_ReceivePacket(USBD_HandleTypeDef *pdev)
 /**
   * @}
   */
+
+#pragma GCC push_options
 

@@ -62,4 +62,8 @@ void m1_spi_hal_init(SPI_HandleTypeDef *phspi);
 HAL_StatusTypeDef m1_spi_hal_trans_req(S_M1_SPI_Trans_Inf *trans_inf);
 uint32_t m1_i2c_hal_get_error(void);
 int32_t m1_spi_hal_wrapper(const uint8_t * const pTxData, uint8_t * const pRxData, uint16_t Length);
+
+/* POSTAUTH-6: checked single-byte ST25R3916 direct command; returns the real
+ * HAL status (HAL_OK/BUSY/ERROR/TIMEOUT). NFC_CS asserted low, byte sent, high. */
+HAL_StatusTypeDef m1_nfc_spi_checked_cmd(uint8_t cmd);
 #endif /* M1_RF_SPI_H_ */

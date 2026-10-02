@@ -1,5 +1,14 @@
 # STM32CubeIDE generated files
 Debug/
+Release/
+
+# CMake/Ninja out-of-tree build (build.sh)
+build/
+artifacts/
+Release/*.bin
+Release/*.elf
+Release/*.map
+Release/*.hex
 Release/*.o
 Release/*.d
 Release/*.su
@@ -45,13 +54,21 @@ logs/
 
 # System files
 .DS_Store
-Thumbs.db
+Thumbs.db 
 
-# Build output (contains machine-specific paths)
+*.bin
+*.elf
+*.hex
+*.list
+*.cyclo
+
+# Build output dirs
 out/
-
-# Generated compile database (contains local paths)
-compile_commands.json
 build/
-/.cache
-/artifacts
+build_*/
+artifacts/
+CMakeFiles/
+
+# Preview harness build
+scratch_preview/
+scratch_refs/

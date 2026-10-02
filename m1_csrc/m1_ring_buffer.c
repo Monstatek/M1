@@ -207,13 +207,12 @@ uint16_t m1_ringbuffer_write(S_M1_RingBuffer *prb_handle, uint8_t *indata, uint1
 uint16_t m1_ringbuffer_insert(S_M1_RingBuffer *prb_handle, uint8_t *indata)
 {
     uint16_t n_free;
-/*
-    if ( !IS_BUFFER_VALID(prb_handle) )
+
+    if ( !IS_BUFFER_VALID(prb_handle) )  /* route2: re-enabled — NULL/invalid buffer must fail safely */
     	return 0;
 
     if ( indata==NULL )
     	return 0;
-*/
     n_free = ringbuffer_get_empty_slots(prb_handle);
     if ( n_free==0 ) // No empty space in the buffer?
     {
@@ -269,7 +268,17 @@ uint16_t m1_ringbuffer_read(S_M1_RingBuffer *prb_handle, uint8_t *outdata, uint1
         memcpy(outdata, padd_r, n_linear*prb_handle->data_size); // Read first linear part
         m1_ringbuffer_advance_read(prb_handle, n_linear); // Update read index
         padd_r = m1_ringbuffer_get_read_address(prb_handle); // Get new read address
-        memcpy(&outdata[n_linear], padd_r, (n_read - n_linear)*prb_handle->data_size); // Read second linear part
+        /* n_linear is an ELEMENT count (m1_ringbuffer_get_read_len() returns
+         * n_slots/data_size); outdata is uint8_t*, so the destination for
+         * the post-wrap part must be offset by n_linear*data_size BYTES,
+         * not n_linear bytes. For data_size==1 these are numerically
+         * identical (which is why this was invisible on single-byte ring
+         * buffers); for data_size>1 (e.g. Sub-GHz raw sample capture,
+         * data_size==2) this placed the second part n_linear*(data_size-1)
+         * bytes too early, corrupting bytes the first memcpy already wrote
+         * and leaving the true tail of the caller's buffer stale. */
+        memcpy(&outdata[(size_t)n_linear * prb_handle->data_size], padd_r,
+               (n_read - n_linear)*prb_handle->data_size); // Read second linear part
         m1_ringbuffer_advance_read(prb_handle, n_read - n_linear); // Update read index
     } while(0);
 

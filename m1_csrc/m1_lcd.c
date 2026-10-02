@@ -28,7 +28,42 @@
 /*************************** D E F I N E S ************************************/
 
 //************************** C O N S T A N T **********************************/
+/*
+static const uint8_t m1_lcd_custom_init_seq[] = {
 
+  U8X8_START_TRANSFER(),             	// enable chip, delay is part of the transfer start
+
+  U8X8_C(0x0e2),            			// soft reset
+  U8X8_C(0x0ae),		                // display off
+  U8X8_C(0x040),		                // set display start line to 0
+
+  U8X8_C(0x0a1),		                // ADC set to reverse
+  U8X8_C(0x0c0),		                // common output mode
+  // Flipmode
+  //U8X8_C(0x0a0),		                // ADC set to reverse
+  //U8X8_C(0x0c8),		                // common output mode
+
+  U8X8_C(0x0a6),		                // display normal, bit val 0: LCD pixel off.
+  U8X8_C(0x0a2),		                // LCD bias 1/9
+  // power on sequence from paxinstruments
+  U8X8_C(0x028|4),		                // all power  control circuits on
+  U8X8_DLY(50),
+  U8X8_C(0x028|6),		                // all power  control circuits on
+  U8X8_DLY(50),
+  U8X8_C(0x028|7),		                // all power  control circuits on
+  U8X8_DLY(50),
+
+  U8X8_C(0x022),		                // v0 voltage resistor ratio
+  U8X8_CA(0x081, 200>>2),				// set contrast, contrast value
+
+  U8X8_C(0x0ae),		                // display off
+  U8X8_C(0x0a5),		                // enter powersafe: all pixel on, issue 142
+
+  U8X8_END_TRANSFER(),             	// disable chip
+  U8X8_END()             			// end of sequence
+};
+*/
+//void u8x8_cad_SendSequence(u8x8_t *u8x8, uint8_t const *data)
 //************************** S T R U C T U R E S *******************************
 
 /***************************** V A R I A B L E S ******************************/
@@ -69,7 +104,6 @@ uint8_t u8x8_byte_stm32_4wire_hw_spi(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int,
 			{
 			    return 0; // Error
 			} // if (status != HAL_OK)
-
 			break;
 
 		// Send once during the init phase of the display
@@ -178,7 +212,6 @@ void m1_lcd_init(SPI_HandleTypeDef *phspi)
 {
 	assert(phspi!=NULL);
 	plcd_hspi = phspi;
-
     HAL_Delay(2); // Wait for stable power after power on, > 1ms
     u8g2_Setup_st7567_enh_dg128064i_f(&m1_u8g2, U8G2_R2, u8x8_byte_stm32_4wire_hw_spi, u8x8_stm32_gpio_and_delay);
 	u8g2_InitDisplay(&m1_u8g2);
@@ -196,7 +229,6 @@ void m1_lcd_init(SPI_HandleTypeDef *phspi)
 
 	//Set power save mode ON to clear any unwanted objects displayed on the LCD unexpectedly after POR
 	u8g2_SetPowerSave(&m1_u8g2, true);
-
 } // void m1_lcd_init(SPI_HandleTypeDef *phspi)
 
 
@@ -236,6 +268,12 @@ uint8_t m1_u8g2_nextpage(void)
 /*============================================================================*/
 void m1_lcd_cleardisplay(void)
 {
+	//u8g2_SetFontMode(&m1_u8g2, 0);
+	//u8g2_ClearDisplay(&m1_u8g2);
+	//u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_BG); // set the color to White
+	//u8g2_DrawBox(&m1_u8g2, 0, 0, M1_LCD_DISPLAY_WIDTH, M1_LCD_DISPLAY_HEIGHT);
+	//u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_TXT); // set the color to Black
+
 	u8g2_ClearBuffer(&m1_u8g2);
 	u8g2_SetBufferCurrTileRow(&m1_u8g2, 0);
 

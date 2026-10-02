@@ -118,8 +118,9 @@ void battery_service_init(void)
 {
 	bq_25896_init();
 	bq25896_set_default_config();
-
 	bq27421_init(); //bq27421_init( 2100, 3200, 240); // Capacity(mA), terminate voltage(mV), taper current(mA, may be terminal current)
+
+	app_soh_service_init();
 	power_status.battery_health = 100;
 }
 
@@ -237,14 +238,9 @@ void battery_status_update(void)
 	if (power_status.status & BQ27421_STATUS_INITCOMP)
 		power_status.battery_level = bat_info.soc_percent;
 
-	if (power_status.soh_state==3)
+	//if (power_status.soh_state==3)
 	{
-		if ((power_status.status & (BQ27421_STATUS_QMAX_UP | BQ27421_STATUS_RES_UP))
-		   ==(BQ27421_STATUS_QMAX_UP | BQ27421_STATUS_RES_UP))
-		{
-			if (bat_info.soh_percent > 95)
-				power_status.battery_health = bat_info.soh_percent;
-		}
+		power_status.battery_health = bat_info.soh_percent;
 	}
 
 	power_status.fullChargeCapacity_mAh = bat_info.fullChargeCapacity_mAh;
@@ -265,5 +261,7 @@ void battery_status_update(void)
 	//power_status.battery_temp = bq_getTSPCT();
 
 	bq_stopADC();
+
+	app_soh_service_process();
 
 }

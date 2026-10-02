@@ -29,6 +29,10 @@
 #include "m1_nfc.h"
 #include "NFC_drv/legacy/nfc_poller.h"
 #include "NFC_drv/legacy/nfc_listener.h"
+#include "NFC_drv/legacy/m1_t2t_transport.h"
+#if defined(M1_MFC_RAW_EMULATION)
+#include "NFC_drv/common/m1_mfc_raw_listener.h"   /* AUTHRX ISR wrapper */
+#endif
 #include "uiView.h"                    // ← 추가: m1_app_send_q_message() 선언
 #include "st25r3916.h"                 // ← 추가: st25r3916Deinitialize() 선언
 #include "rfal_platform.h"
@@ -105,7 +109,15 @@ void NFC_Listening_Init(void)
   platformLog("NFC Listening Init\r\n");
 
   USR_INT_LINE.Line = USR_INT_LINE_NUM;
+#if defined(M1_MFC_RAW_EMULATION)
+  /* AUTHRX: wrap the ST25R INT callback so, after the real st25r3916Isr() runs,
+   * the NFC worker is woken immediately (only while an MFC_EMU session is armed).
+   * Listener path only -- the poller (NFC_Polling_Init) keeps st25r3916Isr, and
+   * the OFF build keeps the original registration (#else). */
+  USR_INT_LINE.RisingCallback = m1_mfc_authrx_isr;
+#else
   USR_INT_LINE.RisingCallback = st25r3916Isr;
+#endif
 
    /* Configure interrupt callback */
   (void)HAL_EXTI_GetHandle(&USR_INT_LINE, USR_INT_LINE.Line);
@@ -149,6 +161,12 @@ void NFC_Polling_DeInit(void)
 void NFC_Listening_DeInit(void)
 {
   //platformLog("NFC Listening DeInit\r\n");
+  /* Final safety net: guarantees the dedicated Type-2 transport is stopped
+   * whenever the Listener role itself is torn down, even on an exit path
+   * that didn't already stop it (NFC_T2TTransportProcess()'s stop-flag
+   * check, or Q_EVENT_NFC_EMULATE_STOP in nfc_driver.c). Idempotent --
+   * a no-op if already stopped, never a second real rfalListenStop(). */
+  m1_t2t_transport_stop();
 }
 
 /**

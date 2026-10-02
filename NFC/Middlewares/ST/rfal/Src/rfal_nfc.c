@@ -62,6 +62,10 @@
 #include "rfal_utils.h"
 #include "rfal_analogConfig.h"
 #include "legacy/nfc_listener.h"   /* Emu_GetPersona for T2T persona gating */
+#if defined(M1_MFC_RAW_EMULATION)
+#include "m1_mfc_raw_listener.h"   /* POSTAUTH-9 critical-window notes (deferred) */
+#include "m1_mfc_raw_session_hw.h" /* Scope C: dedicated raw-MFC session ownership handoff */
+#endif
 #include "logger.h"          /* hex2Str() function declaration */
 
 /*
@@ -1920,7 +1924,65 @@ static ReturnCode rfalNfcListenActivation( void )
 
     
     lmSt = rfalListenGetState( &isDataRcvd, &bitRate );
-    
+
+    /* test08 (diagnostic): MFC Detect Reader -- log LM state + data-received flag
+     * ON CHANGE, reusing the values just read here (no extra getter call, so the
+     * listener dataFlag is not consumed). Reveals whether the LM advances
+     * READY_A(3) -> ACTIVE_A(6) and whether a post-SELECT frame is received. */
+    if( Emu_GetPersona() == EMU_PERSONA_MFC_DETECT )
+    {
+        static rfalLmState s_dbgPrevLm   = (rfalLmState)0xFF;
+        static bool        s_dbgPrevData = false;
+        if( (lmSt != s_dbgPrevLm) || (isDataRcvd != s_dbgPrevData) )
+        {
+            platformLog("[MFC-DR] LM state=%d data=%d\r\n", (int)lmSt, (int)isDataRcvd);
+            s_dbgPrevLm   = lmSt;
+            s_dbgPrevData = isDataRcvd;
+        }
+    }
+
+#if defined(M1_MFC_RAW_EMULATION)
+    /* Raw MFC emulation handoff visibility (task ctx, on-change, not in IRQ/DMA):
+     * [B1-READY] fires once each time the LM transitions INTO ACTIVE_A -- i.e. the
+     * reader completed anticollision + SELECT and the listener is ready for the
+     * first post-select frame. Re-fires per selection because the LM passes through
+     * other states between reads. */
+    if( Emu_GetPersona() == EMU_PERSONA_MFC_EMU )
+    {
+        /* Scope C ownership invariant. The raw-MFC backend takes exclusive
+         * passive-target ownership at SESSION ENTRY (m1_mfc_raw_hw_session_start(),
+         * called synchronously from ListenIni()'s MFC_EMU branch), calling RFAL's
+         * public rfalListenStart()/rfalWorker() low-level primitives DIRECTLY --
+         * NOT via this higher rfalNfcListenActivation()/rfalNfcWorker()/
+         * ListenerCycle() layer, which nfc_driver.c excludes from the very first
+         * PROCESS pass while a raw session is active (m1_mfc_raw_hw_active()
+         * checked BEFORE nfc_process_func() is ever called). This function must
+         * therefore be STRUCTURALLY UNREACHABLE for EMU_PERSONA_MFC_EMU for the
+         * lifetime of a raw session.
+         *
+         * A prior candidate instead hooked ownership acquisition HERE, deep
+         * inside rfalNfcWorker()'s own call stack -- hardware evidence showed
+         * ListenerCycle() kept running its own switch statement in the SAME pass
+         * after the hook fired (a genuine concurrent-ownership bug: RFAL and the
+         * raw backend both touching the radio), producing a listener/session
+         * restart loop before AUTH. This replacement is not a hook but a hard
+         * invariant check: if this branch is EVER entered while a raw session is
+         * active, that is the exact violation being guarded against -- refuse to
+         * process (stay BUSY, do not fall through to any persona logic below,
+         * do not touch gNfcDev/PT-memory) and tear the session down so the
+         * idempotent cleanup path (ListenIni() rebuild) runs, rather than
+         * silently racing it. See m1_nfc_raw_hal.h for the full contract and
+         * NFC/NFC_drv/common/test/mfc_raw_hw_logic_test.c for the host-testable
+         * mirror of this invariant. */
+        if( m1_mfc_raw_hw_active() )
+        {
+            platformLog("[RAW-INVARIANT-VIOLATION] rfalNfcListenActivation entered while raw session active\r\n");
+            m1_mfc_raw_hw_session_end("rfal-reentry-invariant-violation");
+        }
+        return RFAL_ERR_BUSY;
+    }
+#endif
+
     /* [Debug Code - Currently Disabled]
      * The following debug block (#if 0) provides detailed logging for listener activation debugging:
      * 1. Logs listener mode state changes (LM State, DataRcvd flag)
@@ -1989,14 +2051,29 @@ static ReturnCode rfalNfcListenActivation( void )
                 //osDelay(1);
                 /* Check if received data is a Sleep request */
 
-                /* [User Modification] T2T Emulation: Transition all commands to ACTIVATED state 
-                 * for unified handling in nfc_listener.c */
-                if( Emu_GetPersona() == EMU_PERSONA_T2T )
+                /* [User Modification] T2T Emulation + MFC Detect Reader: transition all
+                 * post-SELECT commands to ACTIVATED for unified handling in nfc_listener.c.
+                 * MFC_DETECT added (test05): the MIFARE Classic AUTH 0x60/0x61 is a
+                 * proprietary post-SELECT frame (not RATS/ATR_REQ/SLP_REQ) and would
+                 * otherwise fall through to RFAL_ERR_PROTO and never reach software. */
+
+                if( (Emu_GetPersona() == EMU_PERSONA_T2T) || (Emu_GetPersona() == EMU_PERSONA_MFC_DETECT) )
                 {
                     uint16_t rxBits = gNfcDev.rxLen;
-                    
+
                     if (rxBits < 8U) { return RFAL_ERR_BUSY; }
-                    
+
+                    /* test06: for MFC Detect Reader, mark the remote as an NFC-A poller
+                     * (same as the RATS/T4T path below sets RFAL_NFC_POLL_TYPE_NFCA) so
+                     * rfalNfcDataExchangeStart() returns THIS already-received AUTH frame
+                     * via rfalNfcIsRemDevPoller() instead of starting a fresh RX and
+                     * dropping it. T2T behaviour is unchanged. One log per activation. */
+                    if( Emu_GetPersona() == EMU_PERSONA_MFC_DETECT )
+                    {
+                        gNfcDev.devList->type = RFAL_NFC_POLL_TYPE_NFCA;
+                        platformLog("[MFC-DR] LA cmd=%02X bits=%u\r\n", gNfcDev.rxBuf.rfBuf[0], (unsigned)rxBits);
+                    }
+
                     /* All T2T commands (including GET_VERSION) are transitioned to ACTIVATED state */
                     /* nfc_listener.c handles all T2T commands with unified synchronous transmission */
                     return RFAL_ERR_NONE; //ACTIVATE

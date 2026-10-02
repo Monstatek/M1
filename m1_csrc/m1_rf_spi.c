@@ -39,12 +39,18 @@ Sub-GHz Tx:	GPDMA1_Channel0
 
 #define M1_LOGDB_TAG	"RF_SPI"
 
-#define SPI_NUM_OF_DEVICES_MAX		2
 #define RF_SPI_RX_QUEUE_SIZE		2
 
 //************************** C O N S T A N T **********************************/
 
 static const S_M1_SPI_NSS spi_nss_port[SPI_DEVICE_END_OF_LIST] = {{NFC_CS_GPIO_Port, NFC_CS_Pin}, {SI4463_CS_GPIO_Port, SI4463_CS_Pin}};
+
+/* Single authoritative device-count bound, derived from the actual
+ * spi_nss_port[] length (same sizeof-idiom this codebase uses elsewhere,
+ * e.g. SUBGHZ_REC_FREQ_COUNT). This replaces the former
+ * #define SPI_NUM_OF_DEVICES_MAX 2, a duplicated numeric bound that could
+ * silently drift out of sync with the array if a device were ever added. */
+#define SPI_NSS_PORT_COUNT		(sizeof(spi_nss_port) / sizeof(spi_nss_port[0]))
 
 //************************** S T R U C T U R E S *******************************
 
@@ -127,11 +133,33 @@ HAL_StatusTypeDef m1_spi_hal_trans_req(S_M1_SPI_Trans_Inf *trans_inf)
 {
 	HAL_StatusTypeDef stat = HAL_OK;
 
-	assert(trans_inf!=NULL);
+	/* Fail-closed preflight. The previous assert(trans_inf!=NULL) and
+	 * assert(dev_id < ...) provided NO runtime protection in shipped
+	 * firmware: this project's release build defines NDEBUG (confirmed in
+	 * compile_commands.json), which erases assert() entirely, so a NULL
+	 * trans_inf was dereferenced and dev_id indexed spi_nss_port[]
+	 * unchecked -- a release-active memory-safety boundary. Validate
+	 * everything this function will touch BEFORE taking the mutex, driving
+	 * any NSS pin, or starting any SPI transfer, and reject cleanly with
+	 * HAL_ERROR: no lock is taken and no partial transaction is left
+	 * behind on rejection. dev_id is bounded by SPI_NSS_PORT_COUNT (the
+	 * actual array length, the single authoritative bound). The short-
+	 * circuit order guarantees trans_inf is non-NULL before dev_id is read;
+	 * the (size_t) cast makes a negative/garbage enum value fail closed.
+	 * Applied uniformly to every trans_type -- the NO_NSS variants don't
+	 * index spi_nss_port[], but both real callers already pass an in-range
+	 * dev_id (SPI_DEVICE_NFC / SPI_DEVICE_SUBGHZ), so this rejects nothing
+	 * that works today. */
+	if ((trans_inf == NULL) ||
+	    (pspihdl == NULL) ||
+	    (mutex_rf_spi_trans == NULL) ||
+	    ((size_t)trans_inf->dev_id >= SPI_NSS_PORT_COUNT))
+	{
+		return HAL_ERROR;
+	}
 
 	xSemaphoreTake(mutex_rf_spi_trans, portMAX_DELAY);
 
-	assert(trans_inf->dev_id < SPI_NUM_OF_DEVICES_MAX);
 	switch (trans_inf->trans_type)
 	{
 		case SPI_TRANS_WRITE_DATA:
@@ -267,4 +295,26 @@ int32_t m1_spi_hal_wrapper(const uint8_t * const pTxData, uint8_t * const pRxDat
 
   	return ret;
 } // int32_t m1_spi_hal_wrapper(const uint8_t * const pTxData, uint8_t * const pRxData, uint16_t Length)
+
+
+/*============================================================================*/
+/**
+  * @brief  POSTAUTH-6: checked single-byte ST25R3916 direct command over SPI2,
+  *         returning the ACTUAL HAL status (unlike m1_spi_hal_wrapper which maps
+  *         HAL failures to -2/0). Drives NFC_CS low, transmits `cmd`, drives
+  *         NFC_CS high on every exit path. Used for the D1 (0xD1) handoff so the
+  *         emulator can prove the SPI peripheral actually accepted the byte.
+  * @retval Real HAL_StatusTypeDef from HAL_SPI_Transmit (HAL_OK/BUSY/ERROR/TIMEOUT).
+  */
+/*============================================================================*/
+HAL_StatusTypeDef m1_nfc_spi_checked_cmd(uint8_t cmd)
+{
+	if (pspihdl == NULL) { return HAL_ERROR; }
+	HAL_GPIO_WritePin(spi_nss_port[SPI_DEVICE_NFC].spi_nss_port,
+	                  spi_nss_port[SPI_DEVICE_NFC].spi_nss_pin, GPIO_PIN_RESET);
+	HAL_StatusTypeDef st = HAL_SPI_Transmit(pspihdl, &cmd, 1U, 5U);
+	HAL_GPIO_WritePin(spi_nss_port[SPI_DEVICE_NFC].spi_nss_port,
+	                  spi_nss_port[SPI_DEVICE_NFC].spi_nss_pin, GPIO_PIN_SET);
+	return st;
+} // HAL_StatusTypeDef m1_nfc_spi_checked_cmd(uint8_t cmd)
 

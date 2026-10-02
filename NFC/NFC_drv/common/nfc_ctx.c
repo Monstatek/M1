@@ -3,7 +3,7 @@
 /*
  * nfc_ctx.c
  *
- *      Author: watlogic22
+ *
  */
 
 #include <string.h>
@@ -33,6 +33,26 @@ static inline void nfc_ctx_unlock(void) {}
 /* --------- Internal global variables --------- */
 static uint8_t s_t2t_version[8];
 static uint8_t s_t2t_version_len = 0;
+static uint8_t s_t2t_variant = M1NFC_T2TVAR_UNKNOWN;
+static uint16_t s_t2t_expected_pages = 0;
+static bool     s_t2t_geometry_corrupt = false;
+static uint8_t  s_t2t_auth0;
+static bool     s_t2t_auth0_valid = false;
+static bool     s_t2t_prot;
+static bool     s_t2t_prot_valid = false;
+static uint8_t  s_t2t_authlim;
+static bool     s_t2t_authlim_valid = false;
+static bool     s_t2t_protection_suspected = false;   /* transient -- see nfc_ctx.h */
+static uint16_t s_t2t_first_blocked_page = 0;
+static uint8_t  s_t2t_pwd[4];
+static uint8_t  s_t2t_pack[2];
+static bool     s_t2t_credential_valid = false;
+static uint8_t s_t2t_signature[32];
+static bool    s_t2t_signature_valid = false;
+static uint8_t s_t2t_counter[NFC_T2T_COUNTER_MAX][3];
+static bool    s_t2t_counter_valid[NFC_T2T_COUNTER_MAX];
+static uint8_t s_t2t_tearing[NFC_T2T_COUNTER_MAX];
+static bool    s_t2t_tearing_valid[NFC_T2T_COUNTER_MAX];
 /* --------- Module global context (single instance) --------- */
 static nfc_run_ctx_t g_nfc_ctx;
 
@@ -121,6 +141,7 @@ void nfc_ctx_module_init(void)
     nfc_run_ctx_init(&g_nfc_ctx);
 
     memset(&g_nfc_ctx, 0, sizeof(g_nfc_ctx)); // Initialize NDEF memory
+    g_nfc_ctx.head.family = M1NFC_FAM_UNKNOWN;
     g_nfc_ctx.t2t.valid    = false;
     g_nfc_ctx.t2t.ndef_len = 0;
 
@@ -165,7 +186,7 @@ void nfc_run_ctx_init(nfc_run_ctx_t* c)
 
     /* Header */
     c->head.tech    = 0;
-    c->head.family  = 0;
+    c->head.family  = M1NFC_FAM_UNKNOWN;
     c->head.uid_len = 0;
     c->head.a.has_atqa = false;
     c->head.a.has_sak  = false;
@@ -322,7 +343,7 @@ void nfc_ctx_set_dump(uint16_t unit_size, uint32_t unit_count, uint32_t origin,
  * 
  * @param[in] sak SAK (Select Acknowledge) value
  * @param[in] atqa ATQA (Answer To Request) array (2 bytes)
- * @retval Family code (M1NFC_FAM_*), 0 if unknown
+ * @retval Family code (M1NFC_FAM_*), M1NFC_FAM_UNKNOWN if unrecognised
  */
 /*============================================================================*/
 uint8_t nfc_classify_family_from_nfca(uint8_t sak, const uint8_t atqa[2])
@@ -346,7 +367,9 @@ uint8_t nfc_classify_family_from_nfca(uint8_t sak, const uint8_t atqa[2])
         return M1NFC_FAM_DESFIRE;
     }
 
-    return 0; /* Classic */
+    platformLog("Unknown ISO14443-A (sak=%02X atqa=%02X%02X)\r\n",
+                sak, atqa[0], atqa[1]);
+    return M1NFC_FAM_UNKNOWN;
 }
 
 
@@ -392,9 +415,43 @@ uint8_t FillNfcContextFromDevice(const rfalNfcDevice* dev)
             break;
         }
 
+        case RFAL_NFC_LISTEN_TYPE_NFCV:
+        {
+            /* ISO15693 / NFC-V: capture identity here; DSFID/AFI/blocks are
+             * filled afterwards by the poller's m1_nfcv_read(). */
+            c->head.tech   = M1NFC_TECH_V;
+            c->head.family = M1NFC_FAM_15693;
+            uint8_t len = (uint8_t)dev->nfcidLen;
+            if (len > sizeof(c->head.uid)) len = sizeof(c->head.uid);
+            c->head.uid_len = len;
+            /* ISO15693 UID is transmitted LSB-first; store MSB-first (0xE0
+             * leading) to match the display convention. */
+            for (uint8_t i = 0; i < len; i++) {
+                c->head.uid[i] = dev->nfcid[len - 1U - i];
+            }
+            break;
+        }
+
+        case RFAL_NFC_LISTEN_TYPE_ST25TB:
+        {
+            /* ST25TB / SRI / SRIX (ISO14443-B based). UID comes from the
+             * ST25TB device struct; store reversed for detection
+             * (uid[2]>>2) and display. Variant, chip ID,
+             * blocks and system block are filled afterwards by the poller's
+             * m1_st25tb_read(). */
+            c->head.tech   = M1NFC_TECH_B;
+            c->head.family = M1NFC_FAM_ST25TB;
+            uint8_t len = (uint8_t)RFAL_ST25TB_UID_LEN;
+            if (len > sizeof(c->head.uid)) len = sizeof(c->head.uid);
+            c->head.uid_len = len;
+            for (uint8_t i = 0; i < len; i++) {
+                c->head.uid[i] = dev->dev.st25tb.UID[len - 1U - i];
+            }
+            break;
+        }
+
         case RFAL_NFC_LISTEN_TYPE_NFCB:
         case RFAL_NFC_LISTEN_TYPE_NFCF:
-        case RFAL_NFC_LISTEN_TYPE_NFCV:
         default:
             return 2;
     }
@@ -718,9 +775,13 @@ uint16_t nfc_ctx_get_t2t_page_count(void)
 {
     const nfc_dump_meta_t *d = &g_nfc_ctx.dump;
 
-    /* If not Type 2 / NTAG or no dump */
-    if ( (g_nfc_ctx.head.tech   != M1NFC_TECH_A) ||
-         (g_nfc_ctx.head.family != M1NFC_FAM_ULTRALIGHT) ||
+    /* Serves both the Type-2 page dump (tech A / Ultralight) and a 4-byte-block
+     * ISO15693 / NFC-V dump (tech V / 15693) so Preview and Raw Data reuse the
+     * validated 4-byte-unit rendering. Non-4-byte-block V tags return 0 here. */
+    bool is_t2t  = (g_nfc_ctx.head.tech == M1NFC_TECH_A) && (g_nfc_ctx.head.family == M1NFC_FAM_ULTRALIGHT);
+    bool is_nfcv = (g_nfc_ctx.head.tech == M1NFC_TECH_V) && (g_nfc_ctx.head.family == M1NFC_FAM_15693);
+    bool is_st25tb = (g_nfc_ctx.head.tech == M1NFC_TECH_B) && (g_nfc_ctx.head.family == M1NFC_FAM_ST25TB);
+    if ( (!is_t2t && !is_nfcv && !is_st25tb) ||
          (!d->has_dump) || (d->data == NULL) || (d->unit_size != 4) ) {
         return 0;
     }
@@ -751,8 +812,11 @@ bool nfc_ctx_get_t2t_page(uint16_t pageIndex, uint8_t out[4])
 
     if (!out) return false;
 
-    if ( (g_nfc_ctx.head.tech   != M1NFC_TECH_A) ||
-         (g_nfc_ctx.head.family != M1NFC_FAM_ULTRALIGHT) ||
+    /* Also serves the 4-byte-block ISO15693 / NFC-V dump (see page_count). */
+    bool is_t2t  = (g_nfc_ctx.head.tech == M1NFC_TECH_A) && (g_nfc_ctx.head.family == M1NFC_FAM_ULTRALIGHT);
+    bool is_nfcv = (g_nfc_ctx.head.tech == M1NFC_TECH_V) && (g_nfc_ctx.head.family == M1NFC_FAM_15693);
+    bool is_st25tb = (g_nfc_ctx.head.tech == M1NFC_TECH_B) && (g_nfc_ctx.head.family == M1NFC_FAM_ST25TB);
+    if ( (!is_t2t && !is_nfcv && !is_st25tb) ||
          (!d->has_dump) || (d->data == NULL) || (d->unit_size != 4) ) {
         return false;
     }
@@ -770,6 +834,29 @@ bool nfc_ctx_get_t2t_page(uint16_t pageIndex, uint8_t out[4])
     memcpy(out, page_ptr, 4);
 
     return true;
+}
+
+bool nfc_ctx_t2t_page_valid(uint16_t pageIndex)
+{
+    const nfc_dump_meta_t *d = &g_nfc_ctx.dump;
+
+    bool is_t2t  = (g_nfc_ctx.head.tech == M1NFC_TECH_A) && (g_nfc_ctx.head.family == M1NFC_FAM_ULTRALIGHT);
+    if (!is_t2t || !d->has_dump || d->data == NULL || d->unit_size != 4) {
+        return false;
+    }
+
+    uint32_t pages = d->max_seen_unit + 1U;
+    if ((pages == 0U) || (pages > d->unit_count)) {
+        pages = d->unit_count;
+    }
+    if (pageIndex >= pages) {
+        return false;
+    }
+
+    if (d->valid_bits == NULL) {
+        return true;   /* no bitmap -> treat everything in range as valid */
+    }
+    return ((d->valid_bits[pageIndex >> 3] >> (pageIndex & 7U)) & 1U) != 0U;
 }
 
 /*============================================================================*/
@@ -859,6 +946,624 @@ uint8_t nfc_ctx_get_t2t_version(uint8_t out[8])
     }
     memcpy(out, s_t2t_version, s_t2t_version_len);
     return s_t2t_version_len;
+}
+
+/*============================================================================*/
+/**
+ * @brief nfc_ctx_set_t2t_variant - Record the resolved T2T sub-variant
+ */
+/*============================================================================*/
+void nfc_ctx_set_t2t_variant(uint8_t variant)
+{
+    s_t2t_variant = variant;
+}
+
+/*============================================================================*/
+/**
+ * @brief nfc_ctx_get_t2t_variant - Get the resolved T2T sub-variant
+ */
+/*============================================================================*/
+uint8_t nfc_ctx_get_t2t_variant(void)
+{
+    return s_t2t_variant;
+}
+
+/*============================================================================*/
+/**
+ * @brief nfc_ctx_clear_t2t_version - Reset the raw GET_VERSION tuple to "not
+ * captured". Mirrors nfc_ctx_clear_t2t_signature()/_counters()/_tearing()'s
+ * clear-before-conditionally-set pattern so a file/tag with no version data
+ * can never inherit a stale tuple left over from whatever was loaded/read
+ * previously.
+ */
+/*============================================================================*/
+void nfc_ctx_clear_t2t_version(void)
+{
+    s_t2t_version_len = 0;
+    memset(s_t2t_version, 0, sizeof(s_t2t_version));
+}
+
+void nfc_ctx_set_t2t_expected_pages(uint16_t pages)
+{
+    s_t2t_expected_pages = pages;
+}
+
+uint16_t nfc_ctx_get_t2t_expected_pages(void)
+{
+    return s_t2t_expected_pages;
+}
+
+void nfc_ctx_set_t2t_geometry_corrupt(bool corrupt)
+{
+    s_t2t_geometry_corrupt = corrupt;
+}
+
+bool nfc_ctx_t2t_geometry_corrupt(void)
+{
+    return s_t2t_geometry_corrupt;
+}
+
+/*============================================================================*/
+/**
+ * @brief nfc_ctx_*_t2t_auth0/_prot/_authlim - Protection state parsed from
+ * CFG0/CFG1. See nfc_ctx.h.
+ */
+/*============================================================================*/
+void nfc_ctx_clear_t2t_protection(void)
+{
+    s_t2t_auth0_valid   = false;
+    s_t2t_prot_valid    = false;
+    s_t2t_authlim_valid = false;
+    s_t2t_auth0   = 0;
+    s_t2t_prot    = false;
+    s_t2t_authlim = 0;
+}
+
+void nfc_ctx_set_t2t_auth0(uint8_t auth0)
+{
+    s_t2t_auth0 = auth0;
+    s_t2t_auth0_valid = true;
+}
+
+bool nfc_ctx_get_t2t_auth0(uint8_t *out)
+{
+    if (!out || !s_t2t_auth0_valid) { return false; }
+    *out = s_t2t_auth0;
+    return true;
+}
+
+void nfc_ctx_set_t2t_prot(bool prot)
+{
+    s_t2t_prot = prot;
+    s_t2t_prot_valid = true;
+}
+
+bool nfc_ctx_get_t2t_prot(bool *out)
+{
+    if (!out || !s_t2t_prot_valid) { return false; }
+    *out = s_t2t_prot;
+    return true;
+}
+
+void nfc_ctx_set_t2t_authlim(uint8_t authlim)
+{
+    s_t2t_authlim = authlim;
+    s_t2t_authlim_valid = true;
+}
+
+bool nfc_ctx_get_t2t_authlim(uint8_t *out)
+{
+    if (!out || !s_t2t_authlim_valid) { return false; }
+    *out = s_t2t_authlim;
+    return true;
+}
+
+/*============================================================================*/
+/**
+ * @brief nfc_ctx_*_t2t_protection_suspected - Transient, pre-auth signal
+ * only. Deliberately separate storage from s_t2t_auth0/_prot/_authlim
+ * above -- see nfc_ctx.h for why this must never feed those fields, the
+ * V4 file, or m1_t2t_emu_image_build().
+ */
+/*============================================================================*/
+void nfc_ctx_clear_t2t_protection_suspected(void)
+{
+    s_t2t_protection_suspected  = false;
+    s_t2t_first_blocked_page    = 0;
+}
+
+void nfc_ctx_set_t2t_protection_suspected(uint16_t first_blocked_page)
+{
+    s_t2t_protection_suspected = true;
+    s_t2t_first_blocked_page   = first_blocked_page;
+}
+
+bool nfc_ctx_get_t2t_protection_suspected(uint16_t *first_blocked_page_out)
+{
+    if (!s_t2t_protection_suspected) { return false; }
+    if (first_blocked_page_out) { *first_blocked_page_out = s_t2t_first_blocked_page; }
+    return true;
+}
+
+/*============================================================================*/
+/**
+ * @brief nfc_ctx_*_t2t_credential - Genuine PWD_AUTH (0x1B) password+PACK,
+ * accepted by a real tag. See nfc_ctx.h.
+ */
+/*============================================================================*/
+void nfc_ctx_clear_t2t_credential(void)
+{
+    s_t2t_credential_valid = false;
+    memset(s_t2t_pwd, 0, sizeof(s_t2t_pwd));
+    memset(s_t2t_pack, 0, sizeof(s_t2t_pack));
+}
+
+void nfc_ctx_set_t2t_credential(const uint8_t pwd[4], const uint8_t pack[2])
+{
+    if (!pwd || !pack) { return; }
+    memcpy(s_t2t_pwd, pwd, sizeof(s_t2t_pwd));
+    memcpy(s_t2t_pack, pack, sizeof(s_t2t_pack));
+    s_t2t_credential_valid = true;
+}
+
+bool nfc_ctx_get_t2t_pwd(uint8_t out[4])
+{
+    if (!out || !s_t2t_credential_valid) { return false; }
+    memcpy(out, s_t2t_pwd, sizeof(s_t2t_pwd));
+    return true;
+}
+
+bool nfc_ctx_get_t2t_pack(uint8_t out[2])
+{
+    if (!out || !s_t2t_credential_valid) { return false; }
+    memcpy(out, s_t2t_pack, sizeof(s_t2t_pack));
+    return true;
+}
+
+bool nfc_ctx_t2t_credential_valid(void)
+{
+    return s_t2t_credential_valid;
+}
+
+/*============================================================================*/
+/**
+ * @brief nfc_ctx_*_t2t_signature - Genuine READ_SIGNATURE (0x3C) originality
+ * data. See nfc_ctx.h.
+ */
+/*============================================================================*/
+void nfc_ctx_clear_t2t_signature(void)
+{
+    s_t2t_signature_valid = false;
+    memset(s_t2t_signature, 0, sizeof(s_t2t_signature));
+}
+
+void nfc_ctx_set_t2t_signature(const uint8_t sig[32])
+{
+    if (!sig) { return; }
+    memcpy(s_t2t_signature, sig, sizeof(s_t2t_signature));
+    s_t2t_signature_valid = true;
+}
+
+bool nfc_ctx_get_t2t_signature(uint8_t out[32])
+{
+    if (!out || !s_t2t_signature_valid) { return false; }
+    memcpy(out, s_t2t_signature, sizeof(s_t2t_signature));
+    return true;
+}
+
+bool nfc_ctx_t2t_signature_valid(void)
+{
+    return s_t2t_signature_valid;
+}
+
+/*============================================================================*/
+/**
+ * @brief nfc_ctx_*_t2t_counter / _tearing - Genuine READ_CNT (0x39) and
+ * CHECK_TEARING (0x3E) per-index data. See nfc_ctx.h.
+ */
+/*============================================================================*/
+void nfc_ctx_clear_t2t_counters(void)
+{
+    for (uint8_t i = 0; i < NFC_T2T_COUNTER_MAX; i++) {
+        s_t2t_counter_valid[i] = false;
+        memset(s_t2t_counter[i], 0, sizeof(s_t2t_counter[i]));
+    }
+}
+
+void nfc_ctx_set_t2t_counter(uint8_t idx, const uint8_t val[3])
+{
+    if (!val || idx >= NFC_T2T_COUNTER_MAX) { return; }
+    memcpy(s_t2t_counter[idx], val, 3U);
+    s_t2t_counter_valid[idx] = true;
+}
+
+bool nfc_ctx_get_t2t_counter(uint8_t idx, uint8_t out[3])
+{
+    if (!out || idx >= NFC_T2T_COUNTER_MAX || !s_t2t_counter_valid[idx]) { return false; }
+    memcpy(out, s_t2t_counter[idx], 3U);
+    return true;
+}
+
+bool nfc_ctx_t2t_counter_valid(uint8_t idx)
+{
+    return (idx < NFC_T2T_COUNTER_MAX) && s_t2t_counter_valid[idx];
+}
+
+void nfc_ctx_clear_t2t_tearing(void)
+{
+    for (uint8_t i = 0; i < NFC_T2T_COUNTER_MAX; i++) {
+        s_t2t_tearing_valid[i] = false;
+        s_t2t_tearing[i] = 0U;
+    }
+}
+
+void nfc_ctx_set_t2t_tearing(uint8_t idx, uint8_t val)
+{
+    if (idx >= NFC_T2T_COUNTER_MAX) { return; }
+    s_t2t_tearing[idx] = val;
+    s_t2t_tearing_valid[idx] = true;
+}
+
+bool nfc_ctx_get_t2t_tearing(uint8_t idx, uint8_t *out)
+{
+    if (!out || idx >= NFC_T2T_COUNTER_MAX || !s_t2t_tearing_valid[idx]) { return false; }
+    *out = s_t2t_tearing[idx];
+    return true;
+}
+
+bool nfc_ctx_t2t_tearing_valid(uint8_t idx)
+{
+    return (idx < NFC_T2T_COUNTER_MAX) && s_t2t_tearing_valid[idx];
+}
+
+/*============================================================================*/
+/**
+ * @brief nfc_ctx_clear_iso15693 - Reset the ISO15693/NFC-V info block
+ */
+/*============================================================================*/
+void nfc_ctx_clear_iso15693(void)
+{
+    nfc_run_ctx_t *c = nfc_ctx_get();
+    memset(&c->v, 0, sizeof(c->v));
+    c->v.variant = M1NFC_VVAR_GENERIC;
+}
+
+/*============================================================================*/
+/**
+ * @brief nfc_ctx_set_iso15693_variant - Record the resolved NFC-V sub-variant
+ */
+/*============================================================================*/
+void nfc_ctx_set_iso15693_variant(uint8_t variant)
+{
+    nfc_ctx_get()->v.variant = variant;
+}
+
+/*============================================================================*/
+/**
+ * @brief nfc_ctx_set_iso15693_sysinfo - Store GET SYSTEM INFORMATION results
+ */
+/*============================================================================*/
+void nfc_ctx_set_iso15693_sysinfo(bool has_dsfid, uint8_t dsfid,
+                                  bool has_afi, uint8_t afi,
+                                  uint16_t block_count, uint8_t block_size,
+                                  bool has_sysinfo)
+{
+    nfc_iso15693_info_t *v = &nfc_ctx_get()->v;
+    v->has_dsfid   = has_dsfid;
+    v->dsfid       = dsfid;
+    v->has_afi     = has_afi;
+    v->afi         = afi;
+    v->block_count = block_count;
+    v->block_size  = block_size;
+    v->has_sysinfo = has_sysinfo;
+}
+
+/*============================================================================*/
+/**
+ * @brief nfc_ctx_set_iso15693_blocks_read - Record blocks actually read (X)
+ */
+/*============================================================================*/
+void nfc_ctx_set_iso15693_blocks_read(uint16_t blocks_read)
+{
+    nfc_ctx_get()->v.blocks_read = blocks_read;
+}
+
+/*============================================================================*/
+/**
+ * @brief nfc_ctx_set_iso15693_security - Store block lock/security status (0x2C)
+ */
+/*============================================================================*/
+void nfc_ctx_set_iso15693_security(bool has_security, const uint8_t *locked_bits,
+                                   uint16_t n_blocks, uint16_t locked_count)
+{
+    nfc_iso15693_info_t *v = &nfc_ctx_get()->v;
+    memset(v->block_locked, 0, sizeof(v->block_locked));
+    v->has_security = has_security;
+    v->locked_count = has_security ? locked_count : 0U;
+    if (has_security && (locked_bits != NULL)) {
+        uint16_t maxbits = (uint16_t)(sizeof(v->block_locked) * 8U);
+        if (n_blocks > maxbits) n_blocks = maxbits;
+        memcpy(v->block_locked, locked_bits, (size_t)((n_blocks + 7U) / 8U));
+    }
+}
+
+/*============================================================================*/
+/**
+ * @brief nfc_ctx_iso15693_block_locked - Per-block lock query (read-only)
+ */
+/*============================================================================*/
+bool nfc_ctx_iso15693_block_locked(uint16_t block_index)
+{
+    const nfc_iso15693_info_t *v = &nfc_ctx_get()->v;
+    if (!v->has_security) return false;
+    if (block_index >= (uint16_t)(sizeof(v->block_locked) * 8U)) return false;
+    return ((v->block_locked[block_index >> 3] >> (block_index & 7U)) & 1U) != 0U;
+}
+
+/*============================================================================*/
+/**
+ * @brief nfc_ctx_get_iso15693_info - Get the ISO15693/NFC-V info block
+ */
+/*============================================================================*/
+const nfc_iso15693_info_t * nfc_ctx_get_iso15693_info(void)
+{
+    return &nfc_ctx_get()->v;
+}
+
+/*============================================================================*/
+/**
+ * @brief nfc_ctx_clear_desfire - Reset the DESFire (Type 4A) info block
+ */
+/*============================================================================*/
+void nfc_ctx_clear_desfire(void)
+{
+    memset(&nfc_ctx_get()->desfire, 0, sizeof(nfc_ctx_get()->desfire));
+    mf_desfire_deep_reset(&nfc_ctx_get()->desfire_deep);
+    nfc_transit_result_reset(&nfc_ctx_get()->transit);
+}
+
+/*============================================================================*/
+/**
+ * @brief nfc_ctx_set_desfire_version - Store the parsed GetVersion identity
+ */
+/*============================================================================*/
+void nfc_ctx_set_desfire_version(const uint8_t *v28)
+{
+    nfc_desfire_info_t *d = &nfc_ctx_get()->desfire;
+    d->present = (v28 != NULL);
+    if (v28 != NULL) memcpy(d->v, v28, sizeof(d->v));
+}
+
+/*============================================================================*/
+/**
+ * @brief nfc_ctx_get_desfire_info - Get the DESFire info block (never NULL)
+ */
+/*============================================================================*/
+const nfc_desfire_info_t * nfc_ctx_get_desfire_info(void)
+{
+    return &nfc_ctx_get()->desfire;
+}
+
+/*============================================================================*/
+/**
+ * @brief nfc_ctx_set_desfire_deep - Store a completed deep-read result
+ */
+/*============================================================================*/
+void nfc_ctx_set_desfire_deep(const nfc_desfire_deep_info_t *deep)
+{
+    nfc_desfire_deep_info_t *d = &nfc_ctx_get()->desfire_deep;
+    if (deep == NULL) {
+        mf_desfire_deep_reset(d);
+    } else {
+        *d = *deep;
+    }
+}
+
+/*============================================================================*/
+/**
+ * @brief nfc_ctx_get_desfire_deep - Get the DESFire deep-read block (never NULL)
+ */
+/*============================================================================*/
+const nfc_desfire_deep_info_t * nfc_ctx_get_desfire_deep(void)
+{
+    return &nfc_ctx_get()->desfire_deep;
+}
+
+/*============================================================================*/
+/**
+ * @brief nfc_ctx_set_transit - Store a completed card-interpretation result
+ */
+/*============================================================================*/
+void nfc_ctx_set_transit(const nfc_transit_info_t *transit)
+{
+    nfc_transit_info_t *t = &nfc_ctx_get()->transit;
+    if (transit == NULL) {
+        nfc_transit_result_reset(t);
+    } else {
+        *t = *transit;
+    }
+}
+
+/*============================================================================*/
+/**
+ * @brief nfc_ctx_get_transit - Get the card-interpretation result (never NULL)
+ */
+/*============================================================================*/
+const nfc_transit_info_t * nfc_ctx_get_transit(void)
+{
+    return &nfc_ctx_get()->transit;
+}
+
+/*============================================================================*/
+/**
+ * @brief nfc_ctx_clear_st25tb - Reset the ST25TB/SRI/SRIX info block
+ */
+/*============================================================================*/
+void nfc_ctx_clear_st25tb(void)
+{
+    nfc_run_ctx_t *c = nfc_ctx_get();
+    memset(&c->tb, 0, sizeof(c->tb));
+    c->tb.variant = M1NFC_TBVAR_GENERIC;
+}
+
+/*============================================================================*/
+/**
+ * @brief nfc_ctx_set_st25tb_ident - Record variant, chip ID and geometry
+ */
+/*============================================================================*/
+void nfc_ctx_set_st25tb_ident(uint8_t variant, uint8_t chip_id,
+                              uint16_t block_count, uint8_t block_size)
+{
+    nfc_st25tb_info_t *tb = &nfc_ctx_get()->tb;
+    tb->variant     = variant;
+    tb->chip_id     = chip_id;
+    tb->block_count = block_count;
+    tb->block_size  = block_size;
+}
+
+/*============================================================================*/
+/**
+ * @brief nfc_ctx_set_st25tb_blocks_read - Record data blocks actually read (X)
+ */
+/*============================================================================*/
+void nfc_ctx_set_st25tb_blocks_read(uint16_t blocks_read)
+{
+    nfc_ctx_get()->tb.blocks_read = blocks_read;
+}
+
+/*============================================================================*/
+/**
+ * @brief nfc_ctx_set_st25tb_system - Record the system/OTP block (0xFF)
+ */
+/*============================================================================*/
+void nfc_ctx_set_st25tb_system(const uint8_t sys4[4])
+{
+    nfc_st25tb_info_t *tb = &nfc_ctx_get()->tb;
+    if (sys4) {
+        memcpy(tb->system_otp, sys4, 4);
+        tb->has_system = true;
+    }
+}
+
+/*============================================================================*/
+/**
+ * @brief nfc_ctx_get_st25tb_info - Get the ST25TB/SRI/SRIX info block
+ */
+/*============================================================================*/
+const nfc_st25tb_info_t * nfc_ctx_get_st25tb_info(void)
+{
+    return &nfc_ctx_get()->tb;
+}
+
+/*============================================================================*/
+/**
+ * @brief nfc_ctx_clear_mfc - Reset the MIFARE Classic Phase-A info block
+ */
+/*============================================================================*/
+void nfc_ctx_clear_mfc(void)
+{
+    memset(&nfc_ctx_get()->mfc, 0, sizeof(nfc_ctx_get()->mfc));
+    /* A genuinely new acquisition generation begins here (every call site is
+     * "about to (re)read a card from scratch") -- the Find Missing Keys
+     * dedup/resume state must never survive into it, or a later
+     * continuation could silently trust a byte offset or seen[] set that
+     * belongs to a completely different card. */
+    mfc_dict_resume_reset(nfc_ctx_get_mfc_dict_resume());
+}
+
+/*============================================================================*/
+/**
+ * @brief nfc_ctx_get_mfc_info - Get the MIFARE Classic Phase-A info block
+ */
+/*============================================================================*/
+nfc_mfc_info_t * nfc_ctx_get_mfc_info(void)
+{
+    return &nfc_ctx_get()->mfc;
+}
+
+/*============================================================================*/
+/**
+ * @brief nfc_ctx_get_wr_status - shared NTAG21x live-write status block.
+ * Small, standalone (not part of nfc_run_ctx): it survives the source dump and
+ * carries no duplicated tag data.
+ */
+/*============================================================================*/
+static nfc_wr_status_t s_nfc_wr_status = {0};
+nfc_wr_status_t * nfc_ctx_get_wr_status(void)
+{
+    return &s_nfc_wr_status;
+}
+
+static nfc_mfc_scan_t s_nfc_mfc_scan = {0};
+nfc_mfc_scan_t * nfc_ctx_get_mfc_scan(void)
+{
+    return &s_nfc_mfc_scan;
+}
+void nfc_ctx_clear_mfc_scan(void)
+{
+    memset(&s_nfc_mfc_scan, 0, sizeof(s_nfc_mfc_scan));
+}
+
+static mfc_dict_resume_t s_nfc_mfc_dict_resume = {0};
+mfc_dict_resume_t * nfc_ctx_get_mfc_dict_resume(void)
+{
+    return &s_nfc_mfc_dict_resume;
+}
+
+static nfc_harvest_ui_t s_nfc_harvest = {0};
+nfc_harvest_ui_t * nfc_ctx_get_harvest(void)
+{
+    return &s_nfc_harvest;
+}
+
+static nfc_solve_ui_t s_nfc_solve = {0};
+nfc_solve_ui_t * nfc_ctx_get_solve(void)
+{
+    return &s_nfc_solve;
+}
+
+static nfc_mfc_write_t s_nfc_mfc_write = {0};
+nfc_mfc_write_t * nfc_ctx_get_mfc_write(void)
+{
+    return &s_nfc_mfc_write;
+}
+void nfc_ctx_clear_mfc_write(void)
+{
+    memset(&s_nfc_mfc_write, 0, sizeof(s_nfc_mfc_write));
+}
+
+static nfc_t2t_unlock_t s_nfc_t2t_unlock = {0};
+nfc_t2t_unlock_t * nfc_ctx_get_t2t_unlock(void)
+{
+    return &s_nfc_t2t_unlock;
+}
+void nfc_ctx_clear_t2t_unlock(void)
+{
+    memset(&s_nfc_t2t_unlock, 0, sizeof(s_nfc_t2t_unlock));
+}
+
+/* ---- MFC block-data store: backed by the shared dump buffer bound via
+ * nfc_ctx_set_dump (unit_size = 16). Absolute block index (0..255). ---- */
+bool nfc_ctx_mfc_block_valid(uint16_t blk)
+{
+    nfc_dump_meta_t *d = &g_nfc_ctx.dump;
+    if (!d->has_dump || d->data == NULL || (uint32_t)blk >= NFC_DUMP_MAX_UNITS) return false;
+    if (d->valid_bits == NULL) return true;   /* no bitmap -> treat all as valid */
+    return ((d->valid_bits[blk >> 3] >> (blk & 7U)) & 1U) != 0U;
+}
+
+const uint8_t * nfc_ctx_mfc_block(uint16_t blk)
+{
+    if (!nfc_ctx_mfc_block_valid(blk)) return NULL;
+    return &g_nfc_ctx.dump.data[(uint32_t)blk * M1NFC_MFC_BLOCK_SZ];
+}
+
+void nfc_ctx_mfc_store_block(uint16_t blk, const uint8_t data[16])
+{
+    nfc_dump_meta_t *d = &g_nfc_ctx.dump;
+    if (!d->has_dump || d->data == NULL || (uint32_t)blk >= NFC_DUMP_MAX_UNITS) return;
+    memcpy(&d->data[(uint32_t)blk * M1NFC_MFC_BLOCK_SZ], data, 16);
+    if (d->valid_bits != NULL) d->valid_bits[blk >> 3] |= (uint8_t)(1U << (blk & 7U));
 }
 
 /*============================================================================*/

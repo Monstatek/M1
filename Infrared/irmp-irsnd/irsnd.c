@@ -795,20 +795,20 @@ uint8_t irsnd_generate_tx_data(IRMP_DATA irmp_data)
                 ir_tx_buffer[0] = (address & 0xFF00) >> 8; // AAAAAAAA(H)
                 ir_tx_buffer[1] = (address & 0x00FF);  // AAAAAAAA(L)
                 ir_tx_buffer[2] = (command & 0xFF00) >> 8; // CCCCCCCC(H)
-                ir_tx_buffer[3] = (command & 0x00FF);     // CCCCCCCC(L)
+                ir_tx_buffer[3] = ~((command & 0xFF00) >> 8);     // cccccccc
             }
             ir_tx_active = TRUE;
             break;
 
         case IRMP_ONKYO_PROTOCOL:
         {
-            address = bitsreverse (irmp_data.address, NEC16_ADDRESS_LEN);
-            command = bitsreverse (irmp_data.command, NEC16_COMMAND_LEN);
+            address = bitsreverse (irmp_data.address, NEC_ADDRESS_LEN);
+            command = bitsreverse (irmp_data.command, NEC_COMMAND_LEN);
 
-            ir_tx_buffer[0] = address & 0x00FF; // AAAAAAAA
-            ir_tx_buffer[1] = (~address) & 0x00FF;  // aaaaaaaa
-            ir_tx_buffer[2] = command & 0x00FF; // CCCCCCCC
-            ir_tx_buffer[3] = (~command) & 0x00FF;     // cccccccc
+            ir_tx_buffer[0] = (address & 0xFF00) >> 8;         // AAAAAAAA
+            ir_tx_buffer[1] = (address & 0x00FF); // AAAAAAAA
+            ir_tx_buffer[2] = (command & 0xFF00) >> 8;         // CCCCCCCC
+            ir_tx_buffer[3] = (command & 0x00FF); // CCCCCCCC
             ir_tx_active = TRUE;
             break;
         }

@@ -59,25 +59,6 @@
 /** @defgroup PTD_Logger_Exported_Functions
  *  @{
  */
-/*!
- *****************************************************************************
- *  \brief  Writes out a formated string via UART interface
- *
- *  This function is used to write a formated string via the UART interface.
- *
- *****************************************************************************
- */
-extern void logUsartInit(UART_HandleTypeDef *husart);
-
-/*!
- *****************************************************************************
- *  \brief  Writes out a formated string via UART interface
- *
- *  This function is used to write a formated string via the UART interface.
- *
- *****************************************************************************
- */
-extern int logUsart(const char* format, ...);
 
 /*!
  *****************************************************************************

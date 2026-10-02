@@ -12,10 +12,10 @@
 #ifndef M1_IR_SIGNALS_H_
 #define M1_IR_SIGNALS_H_
 
-#define IR_REMOTE_TYPE_TVS_FILENAME			"0://INFRARED/db/tv.ir"
-#define IR_REMOTE_TYPE_AUDIOS_FILENAME		"0://INFRARED/db/audio.ir"
-#define IR_REMOTE_TYPE_PROJECTORS_FILENAME	"0://INFRARED/db/projector.ir"
-#define IR_REMOTE_TYPE_ACS_FILENAME			"0://INFRARED/db/ac.ir"
+#define IR_REMOTE_TYPE_TVS_FILENAME			"0://infrared/db/tv.ir"
+#define IR_REMOTE_TYPE_AUDIOS_FILENAME		"0://infrared/db/audio.ir"
+#define IR_REMOTE_TYPE_PROJECTORS_FILENAME	"0://infrared/db/projector.ir"
+#define IR_REMOTE_TYPE_ACS_FILENAME			"0://infrared/db/ac.ir"
 
 #define IR_REMOTETYPE_ALL_DEVICES_NONE		0xFF // Undefined function for all IR devices
 

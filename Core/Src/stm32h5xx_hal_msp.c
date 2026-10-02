@@ -552,6 +552,18 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef* htim)
   if(htim->Instance==TIM3)
   {
   /* USER CODE BEGIN TIM3_MspPostInit 0 */
+  /* Re-checked against the RFID-003 hardware-tested binary (LF RFID
+   * emulation/write PASSED with this block disabled): intentionally dead,
+   * not a bug. This would configure RFID_OUT_Pin as TIM3_CH3 alternate
+   * function for hardware PWM output -- an earlier T5577-write approach
+   * abandoned in favor of the current, proven GPIO/DMA-driven method
+   * (lfrfid/lfrfid_hal.c's own HAL_GPIO_Init() calls on this same pin, in
+   * plain output mode). The matching HAL_TIM_PWM_Start(&htim3,...) call is
+   * also commented out (lfrfid/t5577.c). Do not re-enable: it would fight
+   * lfrfid_hal.c for ownership of this pin's mode and risk altering the
+   * currently-working LF transmission path, which this hardening pass is
+   * explicitly forbidden from touching. Left disabled but in place only as
+   * a historical reference. */
 #if 0
   /* USER CODE END TIM3_MspPostInit 0 */
 

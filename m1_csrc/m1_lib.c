@@ -49,7 +49,8 @@ void m1_text_enable(char* out, uint8_t value, uint8_t mask);
 int m1_strtob_with_base(const char *str, uint8_t *out, int max_len, int base);
 void m1_byte_to_hextext(const uint8_t *src, int len, char *out);
 void m1_vkb_set_initial_text(int len, char *out);
-void m1_app_send_q_message(QueueHandle_t Handle, S_M1_Q_Event_Type_t cmd);
+BaseType_t m1_app_send_q_message(QueueHandle_t Handle, S_M1_Q_Event_Type_t cmd);
+uint8_t m1_datfile_keywords_check(char *instr, char *keyword, char delimiter);
 void m1_hard_delay(uint32_t x);
 
 /*************** F U N C T I O N   I M P L E M E N T A T I O N ****************/
@@ -350,13 +351,45 @@ void m1_vkb_set_initial_text(int len, char *out)
   * @retval
   */
 /*============================================================================*/
-void m1_app_send_q_message(QueueHandle_t Handle, S_M1_Q_Event_Type_t cmd)
+BaseType_t m1_app_send_q_message(QueueHandle_t Handle, S_M1_Q_Event_Type_t cmd)
 {
 	S_M1_Main_Q_t q_item;
+	BaseType_t ret;
 
+	if (Handle == NULL)
+	{
+		printf("[QUEUE][ERROR] drop event %d: NULL queue\r\n", (int)cmd);
+		return pdFALSE;
+	}
 	q_item.q_evt_type = cmd;
-    xQueueSend(Handle, &q_item, portMAX_DELAY);
+	ret = xQueueSend(Handle, &q_item, pdMS_TO_TICKS(100));
+	if (ret != pdTRUE)
+		printf("[QUEUE][ERROR] drop event %d: send timeout\r\n", (int)cmd);
+	return ret;
 }
+
+
+/*============================================================================*/
+/**
+  * @brief
+  * @param
+  * @retval
+  */
+/*============================================================================*/
+uint8_t m1_datfile_keywords_check(char *instr, char *keyword, char delimiter)
+{
+	uint8_t error_code = 0;
+	char keywords[20], *runptr;
+
+	sprintf(keywords, "%s%c", keyword, delimiter);
+	runptr = strstr(instr, keywords);
+	if ( runptr!=instr ) // Not found or found at the wrong position?
+	{
+		error_code = 1;
+	} // if ( runptr != instr )
+
+	return error_code;
+} // uint8_t m1_datfile_keywords_check(char *instr, char *keyword, char delimiter)
 
 
 /*============================================================================*/

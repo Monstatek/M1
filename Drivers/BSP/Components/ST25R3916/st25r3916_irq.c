@@ -29,6 +29,20 @@
 #include "st25r3916.h"
 #include "rfal_utils.h"
 
+#if defined(M1_MFC_RAW_EMULATION)
+#include "stm32h5xx.h"                 /* DWT cycle counter (RXE timestamp) */
+extern volatile uint32_t g_m1_rxe_cyc; /* DWT->CYCCNT at the last RXE       */
+extern volatile uint8_t  g_m1_rxe_seen;
+#endif
+
+#if defined(M1_MFC_AT_RX_DIAG)
+/* Reader-side {At}-reception truth: latch which RF events fired during the
+ * poller's {At} receive window (reset by nfc_poller before the transceive). */
+extern volatile uint8_t g_m1_rdr_rxs;  /* start-of-receive (subcarrier seen) */
+extern volatile uint8_t g_m1_rdr_rxe;  /* end-of-receive                     */
+extern volatile uint8_t g_m1_rdr_nre;  /* no-response timer expired          */
+#endif
+
 /*
  ******************************************************************************
  * LOCAL DATA TYPES
@@ -114,7 +128,25 @@ void st25r3916CheckForReceivedInterrupts( void )
        irqStatus |= (uint32_t)iregs[2]<<16;
        irqStatus |= (uint32_t)iregs[3]<<24;
    }
-   
+
+#if defined(M1_MFC_RAW_EMULATION)
+   /* Timestamp the end-of-receive so the {At} FDT can be measured against the
+    * true RF event (not the software poll point). ~a few us after the physical
+    * RXE due to the SPI register read above; a constant offset. */
+   if( (irqStatus & ST25R3916_IRQ_MASK_RXE) != 0U )
+   {
+       g_m1_rxe_cyc  = DWT->CYCCNT;
+       g_m1_rxe_seen = 1U;
+   }
+#endif
+
+#if defined(M1_MFC_AT_RX_DIAG)
+   /* Latch the reader's {At}-window RF events (read-only observation). */
+   if( (irqStatus & ST25R3916_IRQ_MASK_RXS) != 0U ) { g_m1_rdr_rxs = 1U; }
+   if( (irqStatus & ST25R3916_IRQ_MASK_RXE) != 0U ) { g_m1_rdr_rxe = 1U; }
+   if( (irqStatus & ST25R3916_IRQ_MASK_NRE) != 0U ) { g_m1_rdr_nre = 1U; }
+#endif
+
    /* Forward all interrupts, even masked ones to application */
    platformProtectST25RIrqStatus();
    st25r3916interrupt.status |= irqStatus;

@@ -3,7 +3,7 @@
 /*
  * uiView.c
  *
- *      Author: Thomas
+ *
  */
 #include <stdint.h>
 #include <stdbool.h>
@@ -16,6 +16,9 @@
 #include "m1_virtual_kb.h"
 #include "m1_storage.h"
 #include "uiView.h"
+#if defined(M1_MFC_RAW_EMULATION)
+#include "rfal_platform.h"   /* [RAW-TRACE] platformLog for the BACK-out teardown diagnosis */
+#endif
 
 /***************************** V A R I A B L E S ******************************/
 
@@ -100,6 +103,11 @@ void m1_uiView_functions_init(int size, const view_func_t *table)
 /*============================================================================*/
 void m1_uiView_display_switch(uint8_t mode, uint32_t lParam)
 {
+#if defined(M1_MFC_RAW_EMULATION)
+	platformLog("[RAW-TRACE] m1_uiView_display_switch entry from=%u to=%u\r\n",
+	            (unsigned)uiview_current_mode, (unsigned)mode);
+#endif
+
 	uiScreen_timeout_cancel();
 
 #if 0

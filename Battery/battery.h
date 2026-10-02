@@ -8,6 +8,8 @@
 #ifndef BATTERY_H_
 #define BATTERY_H_
 
+#include "soh_filter.h"
+
 #define DELAY_BEFORE_POWER_REBOOT		1000 // ms
 
 typedef enum

@@ -35,6 +35,11 @@ extern USBD_CDC_ItfTypeDef  USBD_CDC_Interface_fops;
 /* Exported macro ------------------------------------------------------------*/
 /* Exported functions ------------------------------------------------------- */
 uint8_t CDC_Transmit_FS(uint8_t* Buf, uint16_t Len);
+void CDC_Rearm_FS(void);
+void CDC_LogCli_ForceRecover_FS(void);
+int CDC_LogCli_GetChar(uint8_t *ch);
+void CDC_LogCli_ResetFifo(void);
+void CDC_LogCli_PushBytes(const uint8_t *data, uint16_t len);
 
 #ifdef __cplusplus
 }

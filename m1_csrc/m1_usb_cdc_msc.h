@@ -13,14 +13,14 @@
 #include "usbd_core.h"
 #include "usbd_conf.h"
 
-#if M1_USB_MODE == M1_CFG_USB_CDC_MSC
+#if M1_USB_CONFIG == M1_CFG_USB_CDC_MSC
 // USB MSC + CDC
 #include "usbd_composite_builder.h"
 #include "usbd_msc_storage.h"
-#elif M1_USB_MODE == M1_CFG_USB_MSC
+#elif M1_USB_CONFIG == M1_CFG_USB_MSC
 // USB MSC
 #include "usbd_msc_storage.h"
-#elif M1_USB_MODE == M1_CFG_USB_CDC
+#elif M1_USB_CONFIG == M1_CFG_USB_CDC
 #endif
 
 #include "usbd_cdc_if.h"
@@ -29,12 +29,14 @@
 #include "semphr.h"
 #include "message_buffer.h"
 
-/*********************************************/
-/* USB CDC operation mode configuration */
+/**************************/
+/* USB CDC operation mode */
+/**************************/
 typedef enum
 {
-  CDC_MODE_LOG_CLI = 0,
-  CDC_MODE_VCP
+    CDC_MODE_ESP32 = 0,
+    CDC_MODE_VCP,
+    CDC_MODE_LOG_CLI
 } enCdcMode;
 
 /*********************************************/
@@ -43,13 +45,14 @@ typedef enum
 #define USB_RX_BUF_SIZE         1024  //128 //512 //1024  //(USB_FS_CHUNK_SIZE * 8)
 #define USB_TX_BUF_SIZE         1024  //(USB_FS_CHUNK_SIZE * 8)
 
-#define RXSTREAMBUF_UART_SIZE   256
+#define RXSTREAMBUF_UART_SIZE   1024
 #define RXSTREAMBUF_USB_SIZE    2048 //8192 //4096 //2048 //USB_RX_BUF_SIZE*2
 
 /*********************************************/
-extern uint8_t CDC_InstID;
+extern volatile uint8_t CDC_InstID;
 
 extern enCdcMode m1_usbcdc_mode;
+extern enCdcMode prev_usbcdc_mode;
 extern USBD_CDC_LineCodingTypeDef linecoding;
 
 extern TaskHandle_t usb2ser_task_hdl;
@@ -60,16 +63,18 @@ extern USBD_HandleTypeDef hUsbDeviceFS;
 extern PCD_HandleTypeDef hpcd_USB_DRD_FS;
 
 extern StreamBufferHandle_t h_uart_rx_streambuf;
-extern volatile uint16_t head_usart1_dma;
-extern volatile uint16_t tail_usart1_dma;
-
 extern StreamBufferHandle_t h_usb_rx_streambuf;
 extern SemaphoreHandle_t ser2usb_task_semaphore;
 extern SemaphoreHandle_t usb2ser_tx_semaphore;
 
+extern volatile uint16_t head_usartx_dma;
 extern volatile uint8_t usbcdc_rx_paused;
 extern volatile int8_t m1_USB_CDC_ready;
-extern volatile uint8_t tx_cptl_usart1;
+extern volatile uint8_t tx_cptl_usartx;
+extern volatile enCdcMode cdc_tx_owner_mode;
+extern volatile uint8_t m1_usbcdc_drop_bridge_tx;
+
+extern volatile uint16_t tail_usartx_dma;
 
 uint16_t usart_get_rx_data_length(void);
 void vUsb2SerTask(void *pvParameters);
@@ -80,9 +85,9 @@ void usart_rxdata_process_from_isr(void);
 void usb_rxdata_process(void);
 
 void USB_DRD_FS_IRQHandler(void);
-void CDC_Signal_Next_Tx(void);
 void m1_usb_cdc_comdefault(void);
 void m1_usb_cdc_comconfig(void);
+void m1_usb_cdc_force_reconnect(void);
 
 /*********************************************/
 // USB MSC

@@ -8,7 +8,13 @@
 *
 * M1 Project
 *
+*
 */
+/*!
+ *
+ * Silicon Laboratories Confidential
+ * Copyright 2011 Silicon Laboratories, Inc.
+ */
 
 #ifndef M1_SUB_GHZ_H_
 #define M1_SUB_GHZ_H_
@@ -56,7 +62,7 @@
 #define SUBGHZ_ISM_BAND_REGION_EUROPE_REGION_1	1
 #define SUBGHZ_ISM_BAND_REGION_ASIA				2
 
-#define SUBGHZ_ISM_BAND_REGION					SUBGHZ_ISM_BAND_REGION_NORTH_AMERICA
+#define SUBGHZ_ISM_BAND_REGION					SUBGHZ_ISM_BAND_REGION_NORTH_AMERICA//SUBGHZ_ISM_BAND_REGION_ASIA//SUBGHZ_ISM_BAND_REGION_NORTH_AMERICA
 // End - Defines for ISM bands regions
 
 // SUBGHZ_GPIO_0(RX)	PORTE.9	<--> TIM1_CH1
@@ -71,6 +77,17 @@
 
 #define SUBGHZ_GPIO_AF_TX          	GPIO_AF1_TIM1
 #define SUBGHZ_GPIO_AF_RX         	GPIO_AF1_TIM1
+/* Menu option: SUBGHz Tx mapped to an external GPIO - TIM8_CH4N */
+#define SUBGHZ_TX_CARRIER_TIMER_REMAP		TIM8
+#define SUBGHZ_TX_TIMER_CLK_REMAP    		__HAL_RCC_TIM8_CLK_ENABLE
+#define SUBGHZ_TX_TIMER_CLK_DIS_REMAP		__HAL_RCC_TIM8_CLK_DISABLE
+#define SUBGHZ_TX_TIMER_TX_CHANNEL_REMAP	TIM_CHANNEL_4
+#define SUBGHZ_TX_GPIO_PORT_REMAP        	PD0_GPIO_Port // GPIOD
+#define SUBGHZ_TX_GPIO_PIN_REMAP      		PD0_Pin // GPIO_PIN_0
+#define SUBGHZ_TX_GPIO_PORT_CLK_REMAP		__HAL_RCC_GPIOD_CLK_ENABLE
+#define SUBGHZ_GPIO_AF_TX_REMAP          	GPIO_AF3_TIM8
+//#define SUBGHZ_TX_TIMER_TX_CHANNEL_REMAP   	TIM_CHANNEL_4 //CH4N - Same channel
+#define SUBGHZ_TX_TIMER_IRQn_REMAP        	TIM8_UP_IRQn
 
 #define TIM_FORCED_ACTIVE      		((uint16_t)0x0050)
 #define TIM_FORCED_INACTIVE    		((uint16_t)0x0040)
@@ -106,6 +123,8 @@ typedef enum
 	SUB_GHZ_OPMODE_EOL
 } S_M1_SubGHz_OpMode;
 
+#define SUB_GHZ_OPMODE_TX_CW	SUB_GHZ_OPMODE_TX
+
 typedef enum {
 	PULSE_DET_NORMAL = 0,
 	PULSE_DET_IDLE,
@@ -134,17 +153,22 @@ void menu_sub_ghz_init(void);
 void menu_sub_ghz_exit(void);
 
 void sub_ghz_init(void);
+void sub_ghz_scan(void);
 void sub_ghz_record(void);
 void sub_ghz_replay(void);
 void sub_ghz_frequency_reader(void);
-void sub_ghz_regional_information(void);
-void sub_ghz_radio_settings(void);
+void sub_ghz_gpio_remap(void);
 
 extern EXTI_HandleTypeDef 	si4463_exti_hdl;
 extern TIM_HandleTypeDef   	timerhdl_subghz_tx;
 extern TIM_HandleTypeDef   	timerhdl_subghz_rx;
 extern DMA_HandleTypeDef	hdma_subghz_tx;
-extern uint8_t subghz_tx_tc_flag;
+extern volatile uint8_t subghz_tx_tc_flag;
 extern S_M1_RingBuffer subghz_rx_rawdata_rb;
 extern uint8_t subghz_record_mode_flag;
+/* ISR latches once; task clears only with capture stopped. */
+extern volatile uint32_t subghz_capture_overflow;
+extern uint8_t subghz_scan_mode_flag;
+extern GPIO_TypeDef *subghz_tx_remap_port;
+extern uint16_t subghz_tx_remap_pin;
 #endif /* M1_SUB_GHZ_H_ */

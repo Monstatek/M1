@@ -19,9 +19,11 @@ void menu_setting_power_exit(void);
 void power_battery_info(void);
 void power_reboot(void);
 void power_off(void);
+void battery_golden_image(void);
 //void power_init(void);
 void m1_pre_power_down(void);
 void m1_power_down(void);
+void power_shutdown_gui_update(uint8_t param);
 
 int power_test_charger(uint8_t reg);
 

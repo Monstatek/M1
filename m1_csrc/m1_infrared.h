@@ -69,12 +69,20 @@
 
 // IR_RX	PORTC.4	<--> TIM2_CH4
 // IR_DRV 	PORTC.5	<--> TIM1_CH4N
-#define IR_GPIO_PORT           GPIOC                    /*!< Port which IR input is connected */
+#define IR_GPIO_PORT           IR_DRV_GPIO_Port // IR_RX_GPIO_Port /*!< Port which IR input is connected */
 #define IR_GPIO_PORT_CLK       __HAL_RCC_GPIOC_CLK_ENABLE      /*!< IR pin GPIO Clock Port */
-#define IR_RX_GPIO_PIN         	GPIO_PIN_4               /*!< Pin which IR is connected */
-#define IR_TX_GPIO_PIN         	GPIO_PIN_5
+#define IR_RX_GPIO_PIN         	IR_RX_Pin               /*!< Pin which IR is connected */
+#define IR_TX_GPIO_PIN         	IR_DRV_Pin
 #define IR_GPIO_AF_TR          	GPIO_AF1_TIM1
 #define IR_GPIO_AF_RX         	GPIO_AF1_TIM2
+/* Menu option: IR Tx mapped to an external GPIO - TIM8_CH4N */
+#define IR_ENCODE_CARRIER_TIMER_REMAP     		TIM8
+#define IR_ENCODE_CARRIER_TIMER_CLK_REMAP 		__HAL_RCC_TIM8_CLK_ENABLE
+#define IR_ENCODE_CARRIER_TIMER_CLK_DIS_REMAP 	__HAL_RCC_TIM8_CLK_DISABLE
+//#define IR_ENCODE_TIMER_TX_CHANNEL_REMAP 		TIM_CHANNEL_4 // Same channel
+#define IR_TX_GPIO_PIN_REMAP     				PD0_Pin
+#define IR_GPIO_PORT_REMAP        				PD0_GPIO_Port
+#define IR_GPIO_AF_TR_REMAP          			GPIO_AF3_TIM8
 
 #define TIM_FORCED_ACTIVE      ((uint16_t)0x0050)
 #define TIM_FORCED_INACTIVE    ((uint16_t)0x0040)
@@ -98,9 +106,9 @@ typedef enum
 void menu_infrared_init(void);
 void menu_infrared_exit(void);
 
-void infrared_universal_remotes(void);
 void infrared_learn_new_remote(void);
 void infrared_saved_remotes(void);
+void infrared_remap_gpio(void);
 void infrared_encode_sys_init(void);
 void infrared_encode_sys_deinit(void);
 S_M1_IR_Tx_States infrared_transmit(uint8_t init, uint8_t tx_protocol);
@@ -120,9 +128,5 @@ extern uint16_t ir_ota_data_tx_len;
 extern volatile uint16_t ir_ota_data_tx_counter;
 extern uint16_t *pir_ota_data_tx_buffer;
 extern const uint32_t ir_carrier_frequency_list[];
-
-#ifdef M1_DEBUG_IR_RX_DATA_BUFFER_ENABLE
-extern uint32_t m1_ir_rx_data_buffer[];
-#endif // #ifdef M1_DEBUG_IR_RX_DATA_BUFFER_ENABLE
 
 #endif /* M1_INFRARED_H_ */

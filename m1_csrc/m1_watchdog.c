@@ -132,7 +132,7 @@ void m1_wdt_report_init(void)
 	{
 		wdt_report[i].run_time = 0;
 	}
-	m1_wdt_add_task_to_report(M1_REPORT_ID_BUTTONS_HANDLER_TASK, M1_WDT_SYSTEM_CHECK_TIMEOUT, 70, 120);
+	m1_wdt_add_task_to_report(M1_REPORT_ID_SYSTEM_PERIODIC_TASK, M1_WDT_SYSTEM_CHECK_TIMEOUT, 70, 120);
 	// Add other tasks here if needed
 } // void m1_wdt_report_init(void)
 
@@ -149,7 +149,7 @@ void m1_wdt_add_task_to_report(S_M1_WDT_Report_ID rpt_id, uint32_t rpt_period, u
 	if ( rpt_id < M1_REPORT_ID_END_OF_LIST )
 	{
 		wdt_report[rpt_id].report_id = rpt_id;
-		wdt_report[rpt_id].inactive = false;
+		wdt_report[rpt_id].inactive = true;
 		wdt_report[rpt_id].report_period = rpt_period;
 		wdt_report[rpt_id].min_rpt_percent = min_rpt_percent;
 		wdt_report[rpt_id].max_rpt_percent = max_rpt_percent;
@@ -205,6 +205,15 @@ static void m1_wdt_checkout_check(void)
 
 	m1_wdt_check_count = 0; // Reset
 } // static void m1_wdt_checkout_check(void)
+
+/* Directly refresh the IWDG. For use inside a long, bounded operation that
+ * legitimately runs a tight loop and would otherwise starve the low-priority
+ * WDT task (e.g. the Gate 0 capture soak). Bypasses the task-health check by
+ * design; the caller owns the time window. */
+void m1_wdt_kick(void)
+{
+	__HAL_IWDG_RELOAD_COUNTER(&hiwdg);
+}
 
 
 
@@ -313,6 +322,7 @@ void m1_wdt_send_report(S_M1_WDT_Report_ID rpt_id, uint32_t time)
 		//taskENTER_CRITICAL();
 		if ( rpt_id < M1_REPORT_ID_END_OF_LIST)
 		{
+			wdt_report[rpt_id].inactive = false;
 			wdt_report[rpt_id].run_time += time;
 		} // if ( rpt_id < M1_REPORT_ID_END_OF_LIST)
 		else
@@ -375,3 +385,8 @@ void m1_wdt_reset(void)
 	// Reset WDT counter
 	__HAL_IWDG_RELOAD_COUNTER(&hiwdg);
 } // void m1_wdt_reset(void)
+
+TaskHandle_t m1_wdt_get_task_handle(void)
+{
+	return m1_wdt_task_hdl;
+} // TaskHandle_t m1_wdt_get_task_handle(void)

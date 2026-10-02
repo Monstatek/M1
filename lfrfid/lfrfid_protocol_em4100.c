@@ -3,12 +3,6 @@
 /*
  * LF RFID (125 kHz) implementation
  *
- * Portions of the data structure definitions and table-driven
- * architecture were adapted from the Flipper Zero firmware project.
- *
- * Original project:
- * https://github.com/flipperdevices/flipperzero-firmware
- *
  * Licensed under the GNU General Public License v3.0 (GPLv3).
  *
  * The functional implementation and modifications were
@@ -36,12 +30,29 @@
 #include "app_freertos.h"
 #include "cmsis_os.h"
 #include "main.h"
-#include "uiView.h"
+#include "uiview.h"
 
 #include "lfrfid.h"
 
 /*************************** D E F I N E S ************************************/
-#define EMUL_EM4100_CORR	(3)
+/* Preserved-behavior note (do not "clean up" to 0 like the FSK protocols):
+ * the old per-edge ISR path wrote TIM5->ARR = time_us directly, with no
+ * inclusive-counter "-1" (rfid_emul_handler(), lfrfid_hal.c, now removed),
+ * so each half-bit's real duration was (fed value)+1 ticks. H10301/AWID/
+ * ioProx/Pyramid's old "-2" constants happened to be EXACTLY the pure
+ * ARR+1 compensation (removed entirely in those files: the new transport,
+ * lfrfid_dma_tx.c, now supplies that same "-1" itself, once, centrally).
+ * EM4100's old "-3" was ONE MORE than that pure compensation -- i.e. this
+ * protocol's real, hardware-confirmed-working output has always run
+ * fractionally faster than a naive reading of its own half_bit_us would
+ * suggest. To reproduce that exact, already-working physical timing under
+ * the new transport (which supplies its own correct "-1"), this constant
+ * is reduced by exactly the 1 tick the transport now contributes -- from
+ * 3 to 2, not to 0. Confirmed by direct arithmetic: old real ticks/half =
+ * (half_bit_us-3)+1; new real ticks/half = (half_bit_us-2); both equal
+ * half_bit_us-2. See lfrfid_dma_tx.c's own header comment for the general
+ * derivation this is a specific exception to. */
+#define EMUL_EM4100_CORR	(2)
 
 #define OUTPUT_INVERT	0
 
@@ -248,13 +259,13 @@ void EM4100_Decoder_Init_Partial(EM4100_Decoder_t* dec)
 /*============================================================================*/
 static bool em4100_extract_fields(EM4100_Decoder_t* dec)
 {
-    // TODO:
+
 	bool valid = true;
 	uint8_t temp_bits[11];
 
 	if (valid) {
 	    // EM4100 Frame successfully decoded and verified.
-	    // TODO:
+
 #if 1	// data parsing
 	  	memset(temp_bits, 0, 10);
 
@@ -288,7 +299,11 @@ static bool em4100_extract_fields(EM4100_Decoder_t* dec)
   * @retval
   */
 /*============================================================================*/
-static uint8_t manchester_symbol_feed(lfrfid_evt_t* stream, lfrfid_evt_t* stream2,uint8_t count, uint16_t Th_us)
+/* Returned by manchester_symbol_feed() when the normalized events would not
+ * fit the destination buffer. Distinct from any legitimate count (<= cap). */
+#define MANCHESTER_FEED_OVERFLOW  0xFFu
+
+static uint8_t manchester_symbol_feed(lfrfid_evt_t* stream, uint8_t stream_cap, lfrfid_evt_t* stream2,uint8_t count, uint16_t Th_us)
 {
     uint8_t output_count = 0;
 
@@ -296,6 +311,11 @@ static uint8_t manchester_symbol_feed(lfrfid_evt_t* stream, lfrfid_evt_t* stream
         lfrfid_evt_t current_evt = stream2[i];
 
            if (IS_FULL_BIT(current_evt.t_us, Th_us)) {
+
+            /* a full-bit expands into two half-bit events: need two free slots */
+            if (output_count + 2u > stream_cap) {
+                return MANCHESTER_FEED_OVERFLOW;
+            }
 
         	stream[output_count].t_us = Th_us;
         	stream[output_count].edge = current_evt.edge;
@@ -306,6 +326,10 @@ static uint8_t manchester_symbol_feed(lfrfid_evt_t* stream, lfrfid_evt_t* stream
             output_count++;
 
         } else {
+
+            if (output_count + 1u > stream_cap) {
+                return MANCHESTER_FEED_OVERFLOW;
+            }
 
             //if (i != output_count) {
             	stream[output_count] = current_evt;
@@ -416,7 +440,7 @@ bool em4100_is_valid(const EM4100_Decoder_t *dec)
     if (preamble != 0b111111111) return false;
 
     // parity check
-    // TODO:
+
 	bool valid = true;
 	uint8_t temp_bits[11];
 
@@ -476,9 +500,18 @@ bool em4100_decoder_execute(void* proto, uint16_t size, void* dec)
     EM4100_Decoder_t *pdec = (EM4100_Decoder_t*)dec;
 
     //if (g_decoder.state != DECODER_STATE_IDLE && g_decoder.detected_half_bit_us != 0) {
-    normalized_count = manchester_symbol_feed(temp_stream, new_stream, size, pdec->detected_half_bit_us);
+    normalized_count = manchester_symbol_feed(temp_stream,
+                                              (uint8_t)(sizeof(temp_stream) / sizeof(temp_stream[0])),
+                                              new_stream, size, pdec->detected_half_bit_us);
     //}
     //p = &temp_stream[0];
+
+    /* Reject the candidate frame if normalization would have overflowed the
+     * destination buffer; do not decode a truncated event stream. */
+    if (normalized_count == MANCHESTER_FEED_OVERFLOW) {
+        EM4100_Decoder_Init_Full(pdec);
+        return false;
+    }
 
     if (pdec->edge_count + normalized_count > sizeof(pdec->edge_buffer) / sizeof(lfrfid_evt_t)) {
         EM4100_Decoder_Init_Full(pdec);
@@ -1032,4 +1065,3 @@ void protocol_em4100_write_send(void* proto)
 
 	t5577_execute_write(lfrfid_program, 0);
 }
-

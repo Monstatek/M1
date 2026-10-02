@@ -1,6 +1,7 @@
 /* See COPYING.txt for license details. */
 
 #include "nfc_fileio.h"
+#include "ff.h"   /* f_tell/f_lseek -- same direct-FIL-access pattern as mfc_key_source_sd.c */
 #include <string.h>
 
 /*============================================================================*/
@@ -103,6 +104,49 @@ int nfcfio_getline(nfcfio_t* io, char* out, size_t outsz) {
         if (w + 1 >= outsz) { out[w] = '\0'; return (int)w; }
         /* Input buffer ended without newline, continue to refill */
     }
+}
+
+/*============================================================================*/
+/**
+ * @brief   Byte offset of the next unconsumed line -- the exact position a
+ *          later nfcfio_seek() must be given to resume streaming exactly
+ *          where a prior getline() session left off, skipping nothing and
+ *          re-reading nothing.
+ * @param   io Pointer to the nfcfio context (a file opened for reading)
+ * @return  The offset, or -1 if io is NULL.
+ * @note    f_tell() alone is NOT this value: it reports the position after
+ *          the last physical refill from SD, which is ahead of whatever
+ *          getline() has actually returned to the caller by however many
+ *          bytes remain buffered (rlen-rpos) but not yet consumed.
+ */
+/*============================================================================*/
+long nfcfio_tell_line_start(nfcfio_t* io) {
+    if (!io) return -1;
+    FSIZE_t  pos        = f_tell(&io->fh);
+    uint32_t unconsumed = io->rlen - io->rpos;
+    if ((FSIZE_t)unconsumed > pos) return -1;   /* defensive: should never happen */
+    return (long)(pos - (FSIZE_t)unconsumed);
+}
+
+/*============================================================================*/
+/**
+ * @brief   Move the read position to a byte offset previously reported by
+ *          nfcfio_tell_line_start(), discarding any buffered-but-unconsumed
+ *          data so the next getline() reads fresh from that exact position.
+ * @param   io Pointer to the nfcfio context (a file opened for reading)
+ * @param   offset Byte offset to seek to
+ * @return  1 on success, 0 on failure (io NULL, or the underlying seek failed --
+ *          the caller's own fallback is simply to stream from the beginning
+ *          instead, never to trust a partially-applied seek)
+ */
+/*============================================================================*/
+int nfcfio_seek(nfcfio_t* io, uint32_t offset) {
+    if (!io) return 0;
+    if (f_lseek(&io->fh, (FSIZE_t)offset) != FR_OK) return 0;
+    io->rlen = 0;
+    io->rpos = 0;
+    io->eof  = 0;
+    return 1;
 }
 
 /*============================================================================*/

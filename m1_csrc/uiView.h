@@ -3,7 +3,7 @@
 /*
  * uiView.h
  *
- *      Author: Thomas
+ *
  */
 
 #ifndef UIVIEW_H_
@@ -11,7 +11,11 @@
 
 enum {
 	VIEW_MODE_IDLE,
-	VIEW_MODE_END = 10
+	VIEW_MODE_END = 22   /* shared uiview_view_list[] size; must be >= the largest
+	                      * per-feature VIEW_MODE_*_END (NFC = 19 with MFC Write +
+	                      * T2T Unlock + PWD dictionary management; a few spare
+	                      * slots kept as headroom -- bump this, not the per-
+	                      * feature enum, if a future addition overflows it) */
 };
 
 #define REG_SFLAG_CLIP          	0x20    /* if set then variable has min/max */

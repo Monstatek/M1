@@ -47,6 +47,14 @@
 #define TASK_PRIORITY_ESP32_TASKS				(tskIDLE_PRIORITY + 10)
 #define TASK_PRIORITY_SYSTEM_TASK_HANDLER		(tskNORMAL_PRIORITY + 0) // Must be at this priority for the Sub-GHz samples recording to work properly!
 #define TASK_PRIORITY_SUBFUNC_HANDLER			(tskNORMAL_PRIORITY + 0)
+/* Temporary priority nfc_worker_task raises itself to (vTaskPrioritySet) for
+ * the duration of a raw MFC-emulation session only (M1_MFC_RAW_EMULATION),
+ * restored to NFC_WORKER_TASK_PRIORITY on session end. This priority boost
+ * scoped to the latency-critical span rather than applied permanently. Kept
+ * strictly below TASK_PRIORITY_SYS_INIT (the one documented absolute-max,
+ * one-shot at boot only) and above every other long-running task priority
+ * in this file. */
+#define M1_MFC_RAWOWN_PRIORITY					(tskABOVENORMAL_PRIORITY + 1)
 #define TASK_PRIORITY_SYS_INIT					(tskNORMAL_PRIORITY + 10) // Must be highest priority for all tasks
 
 #define TASKDELAY_SDCARD_DET_TASK				700 // ms, for SD card detection debouncing
@@ -72,6 +80,18 @@ typedef enum
 	Q_EVENT_NFC_START_EMULATE,
 	Q_EVENT_NFC_EMULATE_STOP,
 	Q_EVENT_NFC_WRITE,
+	Q_EVENT_NFC_START_DETECT_READER,
+	Q_EVENT_NFC_DICT_SCAN,
+	Q_EVENT_NFC_MFC_FIND_KEYS,  /* Find Missing Keys: dictionary-phase continuation
+	                             * of a partial MFC read, same card, resuming
+	                             * (never restarting) the same acquisition */
+	Q_EVENT_NFC_HARVEST,        /* live MIFARE Classic nested-nonce harvest (3b) */
+	Q_EVENT_NFC_SOLVE,          /* MFC Recovery nested-dictionary solve + verify */
+	Q_EVENT_NFC_MFC_WRITE,      /* MIFARE Classic 1K write (clone/restore)       */
+	Q_EVENT_NFC_T2T_UNLOCK,     /* NTAG/Ultralight Unlock (genuine PWD_AUTH)     */
+#if defined(M1_MFC_RAW_EMULATION)
+	Q_EVENT_NFC_MFC_EMULATE,    /* raw MIFARE Classic emulation (Scope B)         */
+#endif
 	Q_EVENT_NFC_COMPLETE,
 	Q_EVENT_NFC_STOP,
 
@@ -86,6 +106,7 @@ typedef enum
 	Q_EVENT_LFRFID_FRAME_READY,
 	Q_EVENT_LFRFID_ERROR_TIMEOUT,
 	Q_EVENT_LFRFID_PROTOCOL_CHANGED,
+	Q_EVENT_LFRFID_PASS_SWITCH,  /* ASK<->PSK acquisition-mode switch timer fired */
 
 	Q_EVENT_UI_LFRFID_START_READ,
 	Q_EVENT_UI_LFRFID_STOP,

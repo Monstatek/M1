@@ -20,6 +20,11 @@
 #include "main.h"
 #include "m1_sdcard.h"
 #include "m1_storage.h"
+#include "m1_nfc.h"
+#include "m1_rfid.h"
+#include "m1_bq25896.h"       /* bq_getVBUS_GD() - USB cable (VBUS) presence      */
+#include "m1_usb_cdc_msc.h"   /* m1_usb_cdc_force_reconnect() - media-ready re-enum */
+#include "m1_file_util.h"
 
 /*************************** D E F I N E S ************************************/
 
@@ -31,7 +36,13 @@
 
 #define BROWSE_GUI_DISP_LINE_LEN_MAX			(M1_LCD_DISPLAY_WIDTH/M1_SUB_MENU_SFONT_WIDTH - 3)
 
-#define SDCARD_EXPLORE_FUNCTIONS_N				1
+#define SDCARD_EXPLORE_FUNCTIONS_N				2
+
+/* USB Drive (MSC) active-mode polling for host-eject and cable (VBUS) loss. */
+#define USBMSC_POLL_MS					250u
+/* Consecutive "no VBUS" polls (~250ms each) required to confirm a physical
+ * cable removal, debouncing brief transients. ~3 x 250ms = ~750ms. */
+#define USBMSC_VBUS_LOSS_DEBOUNCE		3u
 
 //************************** S T R U C T U R E S *******************************
 
@@ -67,12 +78,12 @@ static void menu_setting_storage_exit(void);
 
 void storage_about(void);
 void storage_explore(void);
-void storage_mount(void);
-void storage_unmount(void);
+void storage_usbmsc(void);
 void storage_format(void);
 static void browse_gui_update(uint8_t sel_item, char *file_name);
 static void browse_info_box_update(uint8_t box_y, char *new_info);
 static uint8_t browse_refresh(S_M1_file_info **f_info);
+static uint8_t browse_and_dispatch(S_M1_file_info **f_info);
 S_M1_file_info *storage_browse(void);
 
 /*************** F U N C T I O N   I M P L E M E N T A T I O N ****************/
@@ -215,11 +226,12 @@ void storage_explore(void)
 	BaseType_t ret;
 	uint8_t uret, no_file, sel_active, sel_item, refresh;
 	char *fullpath = NULL;
+	char new_filename[ESP_FILE_NAME_LEN_MAX];
 
 	sel_active = 0;
 	refresh = 0;
 
-	no_file = browse_refresh(&f_info);
+	no_file = browse_and_dispatch(&f_info);
 	if ( no_file )
 	{
 		xQueueReset(main_q_hdl); // Reset main q before return
@@ -283,23 +295,35 @@ void storage_explore(void)
 						if ( sel_active )
 						{
 							fullpath = malloc(ESP_FILE_PATH_LEN_MAX + ESP_FILE_NAME_LEN_MAX + 1);
-							assert(fullpath!=NULL);
-							sprintf(fullpath, "%s/%s", f_info->dir_name, f_info->file_name);
-							uret = m1_fb_delete_file(fullpath);
-							if ( !uret )
-							{
-								sel_active = 0;
-								refresh = 1;
-								browse_info_box_update(INFO_BOX_Y_POS_ROW_3, "DELETE successfully!");
-								vTaskDelay(500);
-							} // if ( !uret )
-							else
+							/* assert() compiles out under NDEBUG (this project's real ARM
+							 * release build passes -DNDEBUG); a failed allocation here --
+							 * reachable from ordinary Delete button presses, not boot --
+							 * would otherwise fall straight into fu_path_combine() on a
+							 * NULL pointer. */
+							if ( fullpath == NULL )
 							{
 								browse_info_box_update(INFO_BOX_Y_POS_ROW_3, "DELETE failed!");
-							} // else
-							sel_active = 0;
-							free(fullpath);
-							fullpath = NULL;
+								sel_active = 0;
+							}
+							else
+							{
+								fu_path_combine(fullpath, ESP_FILE_PATH_LEN_MAX + ESP_FILE_NAME_LEN_MAX + 1, f_info->dir_name, f_info->file_name);
+								uret = m1_fb_delete_file(fullpath);
+								if ( !uret )
+								{
+									sel_active = 0;
+									refresh = 1;
+									browse_info_box_update(INFO_BOX_Y_POS_ROW_3, "DELETE successfully!");
+									vTaskDelay(500);
+								} // if ( !uret )
+								else
+								{
+									browse_info_box_update(INFO_BOX_Y_POS_ROW_3, "DELETE failed!");
+								} // else
+								sel_active = 0;
+								free(fullpath);
+								fullpath = NULL;
+							}
 						} // if ( sel_active )
 					} // if (sel_item==0)
 				} // else if ( this_button_status.event[BUTTON_RIGHT_KP_ID]==BUTTON_EVENT_CLICK )
@@ -322,12 +346,36 @@ void storage_explore(void)
 						    sel_active = 0;
 						} // else
 					} // if (sel_item==0)
+					else if (sel_item==1) // Rename
+					{
+						fullpath = malloc(ESP_FILE_PATH_LEN_MAX + ESP_FILE_NAME_LEN_MAX + 1);
+						/* assert() compiles out under NDEBUG -- see the matching Delete
+						 * branch above for the full rationale. */
+						if ( fullpath == NULL )
+						{
+							browse_info_box_update(INFO_BOX_Y_POS_ROW_3, "RENAME failed!");
+							vTaskDelay(500);
+						}
+						else
+						{
+							fu_path_combine(fullpath, ESP_FILE_PATH_LEN_MAX + ESP_FILE_NAME_LEN_MAX + 1, f_info->dir_name, f_info->file_name);
+							uret = m1_fb_rename_file(fullpath, new_filename, false);
+							if ( uret )
+							{
+								browse_info_box_update(INFO_BOX_Y_POS_ROW_3, "RENAME failed!");
+								vTaskDelay(500);
+							} // if ( uret )
+							free(fullpath);
+							fullpath = NULL;
+						}
+						refresh = 1;
+					} // else if (sel_item==1)
 				} // else if ( this_button_status.event[BUTTON_OK_KP_ID]==BUTTON_EVENT_CLICK )
 
 				if ( refresh )
 				{
 					refresh = 0;
-					no_file = browse_refresh(&f_info);
+					no_file = browse_and_dispatch(&f_info);
 					if ( no_file )
 					{
 						xQueueReset(main_q_hdl); // Reset main q before return
@@ -358,14 +406,21 @@ S_M1_file_info *storage_browse(void)
 {
 	S_M1_Buttons_Status this_button_status;
 	S_M1_Main_Q_t q_item;
-	S_M1_file_info *f_info;
-	uint8_t error_stat, len;
+	const S_M1_file_info *f_info;
+	uint8_t error_stat;
 	BaseType_t ret;
 
 	file_info.status = FB_OK;
 	file_info.file_is_selected = false;
+	info_filename[0] = '\0';
+	info_filepath[0] = '\0';
 
-	m1_fb_init(&m1_u8g2);
+	if (m1_fb_init(&m1_u8g2) == NULL)
+	{
+		file_info.status = FB_ERR_GUI;
+		menu_setting_storage_exit();
+		return &file_info;
+	}
 
 	/* Graphic work starts here */
     m1_u8g2_firstpage(); // This call required for page drawing in mode 1
@@ -376,9 +431,11 @@ S_M1_file_info *storage_browse(void)
     error_stat = 0;
     switch ( m1_sdcard_get_status() )
     {
-    	case SD_access_OK:
-    		m1_fb_display(NULL);
-    		break;
+	case SD_access_OK:
+		/* The common success path below performs the one required initial
+		 * display. Calling it here as well enumerated and rendered the same
+		 * directory twice whenever the card was already mounted. */
+		break;
 
     	case SD_access_NotReady:
     		do
@@ -420,6 +477,7 @@ S_M1_file_info *storage_browse(void)
 			error_stat = 1;
 		}
 	} // if ( !error_stat )
+
     if ( error_stat==1 )
 	{
 		m1_image_message(sd_card_error_46x36, SDCARD_ERROR_IMAGE_WIDTH, SDCARD_ERROR_IMAGE_HEIGHT, sdcard_access_error_message);
@@ -442,6 +500,34 @@ S_M1_file_info *storage_browse(void)
 				ret = xQueueReceive(button_events_q_hdl, &this_button_status, 0);
 				if ( this_button_status.event[BUTTON_BACK_KP_ID]==BUTTON_EVENT_CLICK ) // user wants to exit?
 				{
+					/* Generic Explorer only (m1_fb_explorer_nav_active()): BACK ascends
+					 * one directory instead of exiting, unless already at the real SD
+					 * root -- every other caller of this shared loop (STM32/ESP32
+					 * firmware pickers, NFC/RFID/Sub-GHz Saved browsers) never enables
+					 * explorer-nav mode, so BACK keeps its existing exit-always behavior
+					 * for them, unchanged. */
+					if ( m1_fb_explorer_nav_active() )
+					{
+						m1_fb_back_result_t back_res = m1_fb_navigate_back();
+						if ( back_res == M1_FB_BACK_PARENT_OPENED )
+						{
+							f_info = m1_fb_display(NULL);
+							if ( !f_info || f_info->status != FB_OK )
+							{
+								/* The directory handle was closed before changing to the
+								 * parent.  If reopening that parent fails, this session is
+								 * no longer usable: publish an error result and terminate
+								 * instead of continuing with a closed/stale DIR object. */
+								file_info.status = FB_ERR_SDCARD;
+								file_info.file_is_selected = false;
+								m1_image_message(sd_card_error_46x36, SDCARD_ERROR_IMAGE_WIDTH, SDCARD_ERROR_IMAGE_HEIGHT, sdcard_access_error_message);
+								menu_setting_storage_exit();
+								break;
+							} // if ( !f_info || f_info->status != FB_OK )
+							continue; // Stay in this browsing session; parent directory is now open
+						} // if ( back_res == M1_FB_BACK_PARENT_OPENED )
+						// M1_FB_BACK_AT_ROOT or M1_FB_BACK_ERROR: fall through and exit, same as today
+					} // if ( m1_fb_explorer_nav_active() )
 					menu_setting_storage_exit();
 					break; // Exit and return to the calling task (subfunc_handler_task)
 				} // if ( m1_buttons_status[BUTTON_BACK_KP_ID]==BUTTON_EVENT_CLICK )
@@ -455,19 +541,20 @@ S_M1_file_info *storage_browse(void)
 						continue; // Skip doing tasks, wait for exit or new SD card access status
 					} // if ( m1_sdcard_get_status() != SD_access_OK )
 					f_info = m1_fb_display(&this_button_status);
-					if (f_info->status==FB_OK)
+					if (f_info && f_info->status==FB_OK)
 					{
 						if ( f_info->file_is_selected )
 						{
-							//m1_fb_dyn_strcat(fullpath, 2, "",  f_info->dir_name, f_info->file_name);
-							file_info.file_is_selected = true;
-							strncpy(file_info.file_name, f_info->file_name, ESP_FILE_NAME_LEN_MAX);
-							strncpy(file_info.dir_name, f_info->dir_name, ESP_FILE_PATH_LEN_MAX);
-							len = strlen(f_info->file_name);
-							if ( len >= ESP_FILE_NAME_LEN_MAX )
+							/* Never publish a truncated or unterminated filesystem path. */
+							if (!m1_fb_copy_selection(info_filepath, sizeof(info_filepath),
+							                          info_filename, sizeof(info_filename)))
 							{
-								strcpy(&file_info.file_name[len-4], "...");
+								file_info.status = FB_ERR_SDCARD;
+								m1_image_message(sd_card_error_46x36, SDCARD_ERROR_IMAGE_WIDTH, SDCARD_ERROR_IMAGE_HEIGHT, sdcard_access_error_message);
+								continue;
 							}
+							file_info.status = FB_OK;
+							file_info.file_is_selected = true;
 							menu_setting_storage_exit();
 							break; // Exit and return to the calling task (subfunc_handler_task)
 						} // if ( f_info->file_is_selected )
@@ -490,122 +577,11 @@ S_M1_file_info *storage_browse(void)
 } // S_M1_file_info *storage_browse(void)
 
 
-/*============================================================================*/
-/**
-  * @brief
-  * @param
-  * @retval
-  */
-/*============================================================================*/
-void storage_mount(void)
-{
-	S_M1_Buttons_Status this_button_status;
-	S_M1_Main_Q_t q_item;
-	uint8_t mount_ok;
-	BaseType_t ret;
-
-    mount_ok = m1_sdcard_get_status();
-    /* Graphic work starts here */
-	u8g2_FirstPage(&m1_u8g2);
-    if ( mount_ok!=SD_access_NotReady && mount_ok!=SD_access_OK && mount_ok!=SD_access_NoFS )
-    {
-    	mount_ok = true;
-		u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_TXT);
-		u8g2_SetFont(&m1_u8g2, M1_DISP_RUN_MENU_FONT_B);
-		u8g2_DrawStr(&m1_u8g2, 22, 20, "Mount SD Card");
-		u8g2_SetFont(&m1_u8g2, M1_DISP_FUNC_MENU_FONT_N);
-		u8g2_DrawStr(&m1_u8g2, 18, 30, "SD card will be");
-		u8g2_DrawStr(&m1_u8g2, 18, 40, "accessible");
-
-		u8g2_DrawBox(&m1_u8g2, 0, 52, 128, 12); // Draw an inverted bar at the bottom to display options
-		u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_BG); // Write text in inverted color
-		u8g2_DrawXBMP(&m1_u8g2, 1, 53, 8, 8, arrowleft_8x8); // draw arrowleft icon
-		u8g2_DrawStr(&m1_u8g2, 11, 61, "Cancel");
-		u8g2_DrawXBMP(&m1_u8g2, 119, 53, 8, 8, arrowright_8x8); // draw arrowright icon
-		u8g2_DrawStr(&m1_u8g2, 92, 61, "Mount");
-    } // if ( mount_ok!=SD_access_NotReady && mount_ok!=SD_access_OK && mount_ok!=SD_access_NoFS )
-    else
-    {
-    	mount_ok = false;
-		m1_image_message(sd_card_error_46x36, SDCARD_ERROR_IMAGE_WIDTH, SDCARD_ERROR_IMAGE_HEIGHT, sdcard_access_error_message);
-    }
-	m1_u8g2_nextpage(); // Update display RAM
-
-	while (1 ) // Main loop of this task
-	{
-		;
-		; // Do other parts of this task here
-		;
-		// Wait for the notification from button_event_handler_task to subfunc_handler_task.
-		// This task is the sub-task of subfunc_handler_task.
-		// The notification is given in the form of an item in the main queue.
-		// So let read the main queue.
-		ret = xQueueReceive(main_q_hdl, &q_item, portMAX_DELAY);
-		if (ret==pdTRUE)
-		{
-			if ( q_item.q_evt_type==Q_EVENT_KEYPAD )
-			{
-				// Notification is only sent to this task when there's any button activity,
-				// so it doesn't need to wait when reading the event from the queue
-				ret = xQueueReceive(button_events_q_hdl, &this_button_status, 0);
-				if ( this_button_status.event[BUTTON_BACK_KP_ID]==BUTTON_EVENT_CLICK ) // user wants to exit?
-				{
-					; // Do extra tasks here if needed
-
-					xQueueReset(main_q_hdl); // Reset main q before return
-					break; // Exit and return to the calling task (subfunc_handler_task)
-				} // if ( m1_buttons_status[BUTTON_BACK_KP_ID]==BUTTON_EVENT_CLICK )
-				else if ( this_button_status.event[BUTTON_LEFT_KP_ID]==BUTTON_EVENT_CLICK )
-				{
-					; // Do extra tasks here if needed
-
-					xQueueReset(main_q_hdl); // Reset main q before return
-					break; // Exit and return to the calling task (subfunc_handler_task)
-				} // else if ( this_button_status.event[BUTTON_LEFT_KP_ID]==BUTTON_EVENT_CLICK )
-				else if ( this_button_status.event[BUTTON_RIGHT_KP_ID]==BUTTON_EVENT_CLICK )
-				{
-					if ( mount_ok )
-					{
-						u8g2_FirstPage(&m1_u8g2); // Clear screen
-						u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_TXT);
-						u8g2_SetFont(&m1_u8g2, M1_DISP_RUN_MENU_FONT_B);
-						u8g2_DrawStr(&m1_u8g2, 30, 10, "Mounting...");
-				    	u8g2_DrawXBMP(&m1_u8g2, 55, 16, 18, 32, hourglass_18x32); // Draw icon
-				    	m1_u8g2_nextpage(); // Update display RAM
-
-				    	m1_sdcard_mount();
-				    	mount_ok = m1_sdcard_get_status();
-
-				    	if ( mount_ok==SD_access_OK || mount_ok==SD_access_NoFS )
-				    		mount_ok = true;
-				    	else
-				    		mount_ok = false;
-
-				    	if ( mount_ok )
-						{
-				    		u8g2_DrawStr(&m1_u8g2, 38, 60, "Successful");
-						} // if ( format_ok )
-				    	else
-				    	{
-				    		u8g2_DrawStr(&m1_u8g2, 45, 60, "Failed");
-				    	}
-				    	m1_u8g2_nextpage(); // Update display RAM
-				    	mount_ok = false;
-					} // if ( format_ok )
-				} // else if ( this_button_status.event[BUTTON_RIGT_KP_ID]==BUTTON_EVENT_CLICK )
-				else
-				{
-					; // Do other things for this task, if needed
-				}
-			} // if ( q_item.q_evt_type==Q_EVENT_KEYPAD )
-			else
-			{
-				; // Do other things for this task
-			}
-		} // if (ret==pdTRUE)
-	} // while (1 ) // Main loop of this task
-
-} // void storage_mount(void)
+/* storage_mount()/storage_unmount() (manual Mount/Unmount SD Card screens)
+ * were removed: neither had any caller left once their Settings > Storage
+ * menu items were removed, and the underlying SD driver mount/unmount
+ * primitives (m1_sdcard_mount()/m1_sdcard_unmount()) are still used directly
+ * by the SD auto-retry and USB Mass Storage paths elsewhere in this file. */
 
 
 
@@ -616,104 +592,242 @@ void storage_mount(void)
   * @retval
   */
 /*============================================================================*/
-void storage_unmount(void)
+/* ---- USB Drive screens: the SAME large USB icon in the upper portion for every
+ * state; only the status/action text below changes. ------------------------- */
+#define USBMSC_ICON_W   52
+#define USBMSC_ICON_H   24
+#define USBMSC_ICON_X   ((M1_LCD_DISPLAY_WIDTH - USBMSC_ICON_W) / 2)   /* centered */
+#define USBMSC_ICON_Y   4
+
+static void usbmsc_draw_icon(void)
 {
-	S_M1_Buttons_Status this_button_status;
-	S_M1_Main_Q_t q_item;
-	uint8_t unmount_ok;
-	BaseType_t ret;
+    u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_TXT);
+    u8g2_DrawXBMP(&m1_u8g2, USBMSC_ICON_X, USBMSC_ICON_Y, USBMSC_ICON_W, USBMSC_ICON_H, usb_drive_icon_52x24);
+}
 
-	unmount_ok = m1_sdcard_get_status();
-	if ( unmount_ok==SD_access_OK || unmount_ok==SD_access_NoFS )
-		unmount_ok = true;
-	else
-		unmount_ok = false;
-    /* Graphic work starts here */
-	u8g2_FirstPage(&m1_u8g2);
-    if ( unmount_ok )
-    {
-		u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_TXT);
-		u8g2_SetFont(&m1_u8g2, M1_DISP_RUN_MENU_FONT_B);
-		u8g2_DrawStr(&m1_u8g2, 22, 20, "UnMount SD Card");
-		u8g2_SetFont(&m1_u8g2, M1_DISP_FUNC_MENU_FONT_N);
-		u8g2_DrawStr(&m1_u8g2, 18, 30, "SD card will be");
-		u8g2_DrawStr(&m1_u8g2, 18, 40, "inaccessible");
+/* STATE 1 -- pre-mount gate: "Press [CENTER] to mount" (center-button glyph inline). */
+static void usbmsc_screen_gate(void)
+{
+    u8g2_FirstPage(&m1_u8g2);
+    usbmsc_draw_icon();
+    u8g2_SetFont(&m1_u8g2, M1_DISP_MAIN_MENU_FONT_B);   /* menu bold (helvB08) */
+    const char *a = "Press ", *b = " to mount";
+    int wa = (int)u8g2_GetStrWidth(&m1_u8g2, a);
+    int wb = (int)u8g2_GetStrWidth(&m1_u8g2, b);
+    int x0 = (M1_LCD_DISPLAY_WIDTH - (wa + 10 + wb)) / 2;
+    u8g2_DrawStr(&m1_u8g2, x0, 46, a);
+    u8g2_DrawXBMP(&m1_u8g2, x0 + wa, 37, 10, 10, target_10x10);   /* CENTER button icon */
+    u8g2_DrawStr(&m1_u8g2, x0 + wa + 10, 46, b);
+    m1_u8g2_nextpage();
+}
 
-		u8g2_DrawBox(&m1_u8g2, 0, 52, 128, 12); // Draw an inverted bar at the bottom to display options
-		u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_BG); // Write text in inverted color
-		u8g2_DrawXBMP(&m1_u8g2, 1, 53, 8, 8, arrowleft_8x8); // draw arrowleft icon
-		u8g2_DrawStr(&m1_u8g2, 11, 61, "Cancel");
-		u8g2_DrawXBMP(&m1_u8g2, 119, 53, 8, 8, arrowright_8x8); // draw arrowright icon
-		u8g2_DrawStr(&m1_u8g2, 84, 61, "Unmount");
-    } // if ( unmount_ok )
-    else
+/* STATE 2 -- active / host has the drive: "Eject on computer". */
+static void usbmsc_screen_active(void)
+{
+    u8g2_FirstPage(&m1_u8g2);
+    usbmsc_draw_icon();
+    u8g2_SetFont(&m1_u8g2, M1_DISP_MAIN_MENU_FONT_B);   /* menu bold (helvB08) */
+    const char *t = "Eject on computer";
+    u8g2_DrawStr(&m1_u8g2, (M1_LCD_DISPLAY_WIDTH - (int)u8g2_GetStrWidth(&m1_u8g2, t)) / 2, 46, t);
+    m1_u8g2_nextpage();
+}
+
+/* STATE 3 -- host has ejected: "Ejected" (no "SD card ready"). A genuine remount
+ * failure is still reported truthfully. */
+static void usbmsc_screen_ejected(uint8_t mounted_ok)
+{
+    u8g2_FirstPage(&m1_u8g2);
+    usbmsc_draw_icon();
+    u8g2_SetFont(&m1_u8g2, M1_DISP_MAIN_MENU_FONT_B);   /* menu bold (helvB08) */
+    const char *t = mounted_ok ? "Ejected" : "Remount err";
+    u8g2_DrawStr(&m1_u8g2, (M1_LCD_DISPLAY_WIDTH - (int)u8g2_GetStrWidth(&m1_u8g2, t)) / 2, 44, t);
+    if ( !mounted_ok )
     {
-		m1_image_message(sd_card_error_46x36, SDCARD_ERROR_IMAGE_WIDTH, SDCARD_ERROR_IMAGE_HEIGHT, sdcard_access_error_message);
+        u8g2_SetFont(&m1_u8g2, M1_DISP_FUNC_MENU_FONT_N);
+        const char *e = "Check SD card";
+        u8g2_DrawStr(&m1_u8g2, (M1_LCD_DISPLAY_WIDTH - (int)u8g2_GetStrWidth(&m1_u8g2, e)) / 2, 58, e);
     }
-	m1_u8g2_nextpage(); // Update display RAM
+    m1_u8g2_nextpage();
+}
 
-	while (1 ) // Main loop of this task
-	{
-		;
-		; // Do other parts of this task here
-		;
-		// Wait for the notification from button_event_handler_task to subfunc_handler_task.
-		// This task is the sub-task of subfunc_handler_task.
-		// The notification is given in the form of an item in the main queue.
-		// So let read the main queue.
-		ret = xQueueReceive(main_q_hdl, &q_item, portMAX_DELAY);
-		if (ret==pdTRUE)
-		{
-			if ( q_item.q_evt_type==Q_EVENT_KEYPAD )
-			{
-				// Notification is only sent to this task when there's any button activity,
-				// so it doesn't need to wait when reading the event from the queue
-				ret = xQueueReceive(button_events_q_hdl, &this_button_status, 0);
-				if ( this_button_status.event[BUTTON_BACK_KP_ID]==BUTTON_EVENT_CLICK ) // user wants to exit?
-				{
-					; // Do extra tasks here if needed
+void storage_usbmsc(void)
+{
+    S_M1_Buttons_Status this_button_status;
+    S_M1_Main_Q_t q_item;
+    BaseType_t ret;
+    uint8_t sd_stat;
+    uint8_t vbus_lost_cnt;
+    uint8_t mounted_ok;
 
-					xQueueReset(main_q_hdl); // Reset main q before return
-					break; // Exit and return to the calling task (subfunc_handler_task)
-				} // if ( m1_buttons_status[BUTTON_BACK_KP_ID]==BUTTON_EVENT_CLICK )
-				else if ( this_button_status.event[BUTTON_LEFT_KP_ID]==BUTTON_EVENT_CLICK )
-				{
-					; // Do extra tasks here if needed
+    /* -------------------- CENTER/OK Mount gate --------------------
+     * The SD card stays internally mounted until the user presses CENTER/OK.
+     * Selecting this menu item must never, by itself, hand the card to a host. */
+    usbmsc_screen_gate();
 
-					xQueueReset(main_q_hdl); // Reset main q before return
-					break; // Exit and return to the calling task (subfunc_handler_task)
-				} // else if ( this_button_status.event[BUTTON_LEFT_KP_ID]==BUTTON_EVENT_CLICK )
-				else if ( this_button_status.event[BUTTON_RIGHT_KP_ID]==BUTTON_EVENT_CLICK )
-				{
-					if ( unmount_ok )
-					{
-						u8g2_FirstPage(&m1_u8g2); // Clear screen
-						u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_TXT);
-						u8g2_SetFont(&m1_u8g2, M1_DISP_RUN_MENU_FONT_B);
-						u8g2_DrawStr(&m1_u8g2, 30, 10, "Unmounting...");
-				    	u8g2_DrawXBMP(&m1_u8g2, 55, 16, 18, 32, hourglass_18x32); // Draw icon
-				    	m1_u8g2_nextpage(); // Update display RAM
+    for ( ; ; )
+    {
+        ret = xQueueReceive(main_q_hdl, &q_item, portMAX_DELAY);
+        if ( ret!=pdTRUE || q_item.q_evt_type!=Q_EVENT_KEYPAD )
+            continue;
+        (void)xQueueReceive(button_events_q_hdl, &this_button_status, 0);
 
-				    	m1_sdcard_unmount();
+        if ( this_button_status.event[BUTTON_BACK_KP_ID]==BUTTON_EVENT_CLICK ||
+             this_button_status.event[BUTTON_LEFT_KP_ID]==BUTTON_EVENT_CLICK )
+        {
+            /* Leave without taking ownership; SD stays mounted for internal use. */
+            xQueueReset(main_q_hdl);
+            return;
+        }
 
-				    	u8g2_DrawStr(&m1_u8g2, 38, 60, "Successful");
-						m1_u8g2_nextpage(); // Update display RAM
-				    	unmount_ok = false;
-					} // if ( format_ok )
-				} // else if ( this_button_status.event[BUTTON_RIGT_KP_ID]==BUTTON_EVENT_CLICK )
-				else
-				{
-					; // Do other things for this task, if needed
-				}
-			} // if ( q_item.q_evt_type==Q_EVENT_KEYPAD )
-			else
-			{
-				; // Do other things for this task
-			}
-		} // if (ret==pdTRUE)
-	} // while (1 ) // Main loop of this task
+        if ( this_button_status.event[BUTTON_OK_KP_ID]==BUTTON_EVENT_CLICK )
+        {
+            /* Require a live USB cable (VBUS present, via the BQ25896 charger)
+             * before handing over the card. This also arms cable-removal
+             * detection immediately and avoids a false "unsafe removal" when no
+             * host is attached. RIGHT is intentionally unused. */
+            if ( bq_getVBUS_GD()==0 )
+            {
+                u8g2_FirstPage(&m1_u8g2);
+                u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_TXT);
+                u8g2_SetFont(&m1_u8g2, M1_DISP_MAIN_MENU_FONT_B);   /* menu bold (helvB08) */
+                {
+                    const char *l1 = "Please connect";
+                    const char *l2 = "USB cable";
+                    u8g2_DrawStr(&m1_u8g2, (M1_LCD_DISPLAY_WIDTH - (int)u8g2_GetStrWidth(&m1_u8g2, l1)) / 2, 28, l1);
+                    u8g2_DrawStr(&m1_u8g2, (M1_LCD_DISPLAY_WIDTH - (int)u8g2_GetStrWidth(&m1_u8g2, l2)) / 2, 44, l2);
+                }
+                m1_u8g2_nextpage();
+                vTaskDelay(pdMS_TO_TICKS(2400));   /* doubled dwell (~2.4s) */
+                /* Redraw the gate prompt and keep waiting for a valid Mount. */
+                usbmsc_screen_gate();
+                continue;
+            }
+            break; /* VBUS present -> proceed to the mount transition */
+        }
+        /* Any other key is ignored on the gate. */
+    }
 
-} // void storage_unmount(void)
+    /* Transition order: block user filesystem access, sync/close any writable
+     * handles, unmount, then enable MSC. This modal path runs in
+     * subfunc_handler_task with no background SD writer or persistent writable
+     * handles. Verify each step and never grant MSC after a failure. */
+    sd_stat = m1_sdcard_get_status();
+    if ( sd_stat!=SD_access_OK && sd_stat!=SD_access_NoFS )
+    {
+        /* No usable card to share (NotReady / NotOK). Do not grant MSC. */
+        u8g2_FirstPage(&m1_u8g2);
+        m1_image_message(sd_card_error_46x36, SDCARD_ERROR_IMAGE_WIDTH, SDCARD_ERROR_IMAGE_HEIGHT, sdcard_access_error_message);
+        m1_u8g2_nextpage();
+        vTaskDelay(pdMS_TO_TICKS(1500));
+        xQueueReset(main_q_hdl);
+        return;
+    }
+
+    /* This entry path has no open writable handles. If a writer is added,
+     * sync and close its handles here before unmounting. */
+
+    if ( m1_sdcard_unmount()!=FR_OK )
+    {
+        /* Unmount failed -> restore the internal mount, report, do NOT grant MSC. */
+        m1_sdcard_mount();
+        u8g2_FirstPage(&m1_u8g2);
+        u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_TXT);
+        u8g2_SetFont(&m1_u8g2, M1_DISP_RUN_MENU_FONT_B);
+        u8g2_DrawStr(&m1_u8g2, 22, 24, "Storage busy");
+        u8g2_SetFont(&m1_u8g2, M1_DISP_FUNC_MENU_FONT_N);
+        u8g2_DrawStr(&m1_u8g2, 14, 42, "Cannot share now");
+        m1_u8g2_nextpage();
+        vTaskDelay(pdMS_TO_TICKS(1500));
+        xQueueReset(main_q_hdl);
+        return;
+    }
+
+    /* Clear any stale host-eject event, then grant ownership - only now that the
+     * card is confirmed unmounted from the internal FatFs. */
+    usbmsc_host_ejected = 0;
+    usbmsc_sd_enable = true;
+
+    /* MSC readiness is now satisfied by construction (status==UnMounted, card
+     * present, usbmsc_sd_enable==true -> STORAGE_status_usbmsc_sd() reports ready
+     * when the host probes).
+     *
+     * Media-ready re-enumeration: media is prepared FIRST (above); now force the
+     * host to re-probe by toggling D+, so the host's first TEST_UNIT_READY /
+     * READ_CAPACITY after enumeration already sees ready media (no slow retry). */
+    m1_usb_cdc_force_reconnect();
+
+    /* -------------------- Active screen -------------------- */
+    usbmsc_screen_active();
+
+    /* -------- Active loop: event-driven reclaim, in task context -------- */
+    vbus_lost_cnt = 0;
+    for ( ; ; )
+    {
+        ret = xQueueReceive(main_q_hdl, &q_item, pdMS_TO_TICKS(USBMSC_POLL_MS));
+
+        /* (1) Confirmed host eject (posted by the SCSI START_STOP_UNIT hook).
+         *     Reclaim cleanly: disable MSC first, then remount. No warning. */
+        if ( usbmsc_host_ejected )
+        {
+            usbmsc_sd_enable = false;
+            m1_sdcard_mount();
+            sd_stat = m1_sdcard_get_status();
+            mounted_ok = ( sd_stat==SD_access_OK || sd_stat==SD_access_NoFS );
+
+            usbmsc_screen_ejected(mounted_ok);
+            vTaskDelay(pdMS_TO_TICKS(1500));
+            xQueueReset(main_q_hdl);
+            return;
+        }
+
+        /* (2) Physical cable removal via debounced VBUS loss. Reached only if no
+         *     host eject occurred first. Reclaim the card silently: the brief
+         *     "unsafe removal" notice has been removed. A genuine remount /
+         *     filesystem failure is still reported rather than hidden. */
+        if ( bq_getVBUS_GD()==0 )
+        {
+            vbus_lost_cnt++;
+            if ( vbus_lost_cnt>=USBMSC_VBUS_LOSS_DEBOUNCE )
+            {
+                usbmsc_sd_enable = false;   /* drop ownership before remount */
+                m1_sdcard_mount();
+                sd_stat = m1_sdcard_get_status();
+                mounted_ok = ( sd_stat==SD_access_OK || sd_stat==SD_access_NoFS );
+
+                if ( !mounted_ok )
+                {
+                    u8g2_FirstPage(&m1_u8g2);
+                    u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_TXT);
+                    u8g2_SetFont(&m1_u8g2, M1_DISP_RUN_MENU_FONT_B);
+                    u8g2_DrawStr(&m1_u8g2, 10, 24, "Remount failed");
+                    u8g2_SetFont(&m1_u8g2, M1_DISP_FUNC_MENU_FONT_N);
+                    u8g2_DrawStr(&m1_u8g2, 20, 42, "Check SD card");
+                    m1_u8g2_nextpage();
+                    vTaskDelay(pdMS_TO_TICKS(1500));
+                }
+                xQueueReset(main_q_hdl);
+                return;
+            }
+        }
+        else
+        {
+            vbus_lost_cnt = 0; /* VBUS present -> reset debounce */
+        }
+
+        /* (3) Buttons: Back/Left must NOT steal a mounted volume. Re-show the
+         *     eject instruction and stay active. */
+        if ( ret==pdTRUE && q_item.q_evt_type==Q_EVENT_KEYPAD )
+        {
+            (void)xQueueReceive(button_events_q_hdl, &this_button_status, 0);
+            if ( this_button_status.event[BUTTON_BACK_KP_ID]==BUTTON_EVENT_CLICK ||
+                 this_button_status.event[BUTTON_LEFT_KP_ID]==BUTTON_EVENT_CLICK )
+            {
+                usbmsc_screen_active();   /* re-show active state (same icon + "Eject on computer") */
+            }
+        }
+    }
+
+} // void storage_usbmsc(void)
 
 
 
@@ -802,6 +916,9 @@ static uint8_t browse_refresh(S_M1_file_info **f_info)
 {
 	uint8_t uret, sys_error = 1;
 
+	m1_fb_set_sort_enabled(true);       /* generic explorer: alphabetical, dir-first */
+	m1_fb_set_friendly_names(true);     /* display-only top-level labels */
+	m1_fb_set_explorer_nav_enabled(true); /* generic explorer: BACK ascends one level */
 	*f_info = storage_browse();
 	if ( (*f_info)->file_is_selected )
 	{
@@ -816,6 +933,72 @@ static uint8_t browse_refresh(S_M1_file_info **f_info)
 
 	return sys_error;
 } // static uint8_t browse_refresh(S_M1_file_info **f_info)
+
+/* ---- General-browser -> native-feature dispatch (separation of
+ * filesystem browsing from saved-content shortcuts; M1 native handlers remain the
+ * single source of truth for loading/validation/result screens) --------------- */
+extern void sub_ghz_replay(void);   /* SubG  Replay menu entry (m1_sub_ghz.c)*/
+
+static char s_ex_dir[ESP_FILE_PATH_LEN_MAX + 1];
+static char s_ex_name[ESP_FILE_NAME_LEN_MAX + 1];
+static S_M1_file_info s_ex_info;
+static uint8_t s_ex_state = 0;   /* 0 idle, 1 pending, 2 active */
+
+void m1_browser_request_explore_open(const S_M1_file_info *f)
+{
+	strncpy(s_ex_dir,  (f && f->dir_name)  ? f->dir_name  : "", sizeof(s_ex_dir)  - 1); s_ex_dir[sizeof(s_ex_dir)  - 1] = 0;
+	strncpy(s_ex_name, (f && f->file_name) ? f->file_name : "", sizeof(s_ex_name) - 1); s_ex_name[sizeof(s_ex_name) - 1] = 0;
+	s_ex_info.dir_name = s_ex_dir; s_ex_info.file_name = s_ex_name;
+	s_ex_info.file_is_selected = true; s_ex_info.status = FB_OK;
+	s_ex_state = 1; /* pending */
+}
+S_M1_file_info *m1_browser_explore_take_pending(void)
+{
+	if (s_ex_state == 1) { s_ex_state = 2; return &s_ex_info; } /* -> active */
+	return NULL;
+}
+int  m1_browser_explore_active(void) { return s_ex_state == 2; }
+void m1_browser_explore_end(void)    { s_ex_state = 0; }
+
+static int ex_ends_with(const char *name, const char *ext)
+{
+	size_t n = strlen(name), e = strlen(ext), i; const char *p;
+	if (n < e) return 0;
+	p = name + (n - e);
+	for (i = 0; i < e; i++) { char a = p[i], b = ext[i]; if (a>='A'&&a<='Z') a+=32; if (b>='A'&&b<='Z') b+=32; if (a!=b) return 0; }
+	return 1;
+}
+/* Recognize by extension and DISPATCH into the native feature flow (which loads,
+ * validates, shows its result view, and returns to us on Back). */
+static int explore_dispatch_recognized(S_M1_file_info *f)
+{
+	if (!f || !f->file_name) return 0;
+	/* Native saved-file menus render via the shared submenu path, which keys off
+	 * menu_level_id. Reached from the browser (outside the menu system) it can be
+	 * stale at 0 -> main-menu look (left icons + large font). Force sub-menu level
+	 * so a recognized file renders identically to its in-feature Saved/Replay entry. */
+	m1_gui_force_sub_menu_level();
+	if      (ex_ends_with(f->file_name, ".nfc"))  { nfc_saved_launch(f->dir_name, f->file_name);         return 1; }
+	else if (ex_ends_with(f->file_name, ".rfid")) { rfid_125khz_saved_launch(f->dir_name, f->file_name); return 1; }
+	else if (ex_ends_with(f->file_name, ".sgh"))  { m1_browser_request_explore_open(f); sub_ghz_replay();    m1_browser_explore_end(); return 1; }
+	return 0;
+}
+/* Browse; recognized file -> native flow then re-browse; unknown file -> return so
+ * the caller offers the generic Rename/Delete actions. */
+static uint8_t browse_and_dispatch(S_M1_file_info **f_info)
+{
+	uint8_t no_file;
+	for (;;)
+	{
+		no_file = browse_refresh(f_info);
+		if (no_file) return no_file;
+		if (!explore_dispatch_recognized(*f_info)) return 0;
+		/* recognized file opened in its native view; on Back, re-browse the SAME
+		 * folder (one-shot start dir) instead of jumping to root. */
+		if ((*f_info) && (*f_info)->dir_name && (*f_info)->dir_name[0])
+			m1_fb_set_start_dir((*f_info)->dir_name);
+	}
+}
 
 
 

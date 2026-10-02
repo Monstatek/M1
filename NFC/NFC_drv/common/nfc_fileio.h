@@ -81,6 +81,28 @@ static inline void nfcfio_set_crlf(nfcfio_t* io, int on) { if (io) io->eol_crlf 
  */
 int  nfcfio_getline(nfcfio_t* io, char* out, size_t outsz);
 
+/*============================================================================*/
+/* Resume support (optional -- only needed by a caller that wants to seek
+ * back into a large file across two separate open/read sessions, e.g. the
+ * MIFARE Classic dictionary-acquisition resume cursor). */
+/*============================================================================*/
+/**
+ * @brief Byte offset of the next line getline() would return -- pass this to
+ *        nfcfio_seek() in a LATER session to resume exactly here.
+ * @param io Pointer to the nfcfio context
+ * @return The offset, or -1 if io is NULL.
+ */
+long nfcfio_tell_line_start(nfcfio_t* io);
+
+/**
+ * @brief Move to a byte offset previously reported by nfcfio_tell_line_start(),
+ *        discarding any buffered-but-unconsumed data.
+ * @param io Pointer to the nfcfio context
+ * @param offset Byte offset to seek to
+ * @return 1 on success, 0 on failure
+ */
+int  nfcfio_seek(nfcfio_t* io, uint32_t offset);
+
 /**
  * @brief Write a string to file (no newline appended)
  * @param io Pointer to the nfcfio context

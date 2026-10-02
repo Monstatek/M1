@@ -13,6 +13,8 @@
 #ifndef M1_BUZZER_H_
 #define M1_BUZZER_H_
 
+#include <stdbool.h>
+
 #ifdef M1_APP_BUZZER_USE_TIMER3
 
 #define BUZZER_TIMER				TIM3        /*!< Timer used for Audio encoding */
@@ -65,9 +67,36 @@
 #define BUZZER_CARRIER_PRESCALE_FACTOR		10
 #define BUZZER_BASEBAND_PRESCALE_FACTOR		2
 
-void m1_buzzer_notification(void);
-void m1_buzzer_notification2(void);
-void m1_buzzer_demoTest(uint8_t freqStp);
-void m1_buzzer_set(uint16_t frequency, uint16_t duration_ms);
+typedef enum
+{
+	M1_BUZZER_ACCEPTED = 0,	/* tone started						*/
+	M1_BUZZER_MUTED,		/* sound is muted, request dropped		*/
+	M1_BUZZER_BUSY,			/* already playing / rate-limited		*/
+	M1_BUZZER_INVALID,		/* bad args or unsafe calling context	*/
+	M1_BUZZER_HW_FAIL,		/* timer/PWM peripheral failed to arm	*/
+} m1_buzzer_result_t;
+
+m1_buzzer_result_t m1_buzzer_set(uint16_t frequency, uint16_t duration_ms);
+m1_buzzer_result_t m1_buzzer_notification(void);
+m1_buzzer_result_t m1_buzzer_notification2(void);
+m1_buzzer_result_t m1_buzzer_demoTest(uint8_t freqStp);
+m1_buzzer_result_t m1_buzzer_cancel(void);
+m1_buzzer_result_t m1_buzzer_shutdown(void);
+void m1_buzzer_set_muted(bool muted);
+bool m1_buzzer_is_muted(void);
+
+/*
+ * Non-blocking start/stop primitives for the M1 feedback manager's hardware
+ * adapter (m1_feedback_hw_adapter.c). Unlike m1_buzzer_set() above, these do
+ * not use a self-expiring software timer: the pitch is held until
+ * m1_buzzer_stop_note() is called, matching MSG_SND_NOTE/MSG_SND_OFF
+ * semantics (M1-FB-STD-001 v1.1, section 4.3). This is an intentional,
+ * minimal driver-level addition -- the manager's "hold a note until told to
+ * stop" model cannot be expressed with the pre-existing timer-scheduled
+ * m1_buzzer_set() API. Only the feedback manager's hardware adapter may
+ * call these; diagnostic/factory CLI code continues to use m1_buzzer_set().
+ */
+m1_buzzer_result_t m1_buzzer_start_note(uint16_t frequency_hz);
+m1_buzzer_result_t m1_buzzer_stop_note(void);
 
 #endif /* M1_BUZZER_H_ */

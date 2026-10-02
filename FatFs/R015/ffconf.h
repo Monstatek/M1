@@ -84,8 +84,21 @@
 / Locale and Namespace Configurations
 /---------------------------------------------------------------------------*/
 
-#define FF_CODE_PAGE	932
-/* This option specifies the OEM code page to be used on the target system.
+#define FF_CODE_PAGE	437
+/* M1 policy: filenames M1 itself creates are restricted to lowercase ASCII
+/  letters, digits, underscore, and period by the on-device keyboard (M1
+/  cannot type a Japanese/Korean filename at all), so CP932's ~59 KB of
+/  Shift_JIS conversion tables (oem2uni932/uni2oem932, confirmed via the
+/  linked ELF -- 0x7378 bytes each) bought this build no reachable
+/  capability. CP437 is the smallest table (256 bytes, ASCII 0-127 is a
+/  passthrough) that still lets FF_USE_LFN=2 do case-insensitive SFN<->LFN
+/  matching for imported SD content. A filename imported from elsewhere
+/  (e.g. a PC or another device) containing non-ASCII/non-CP437 bytes is
+/  still readable byte-for-byte -- FatFs stores/matches unrecognized OEM
+/  bytes verbatim -- it just won't case-fold or Unicode-normalize past
+/  CP437's table, which M1's own UI never needed to do anyway.
+/
+/  This option specifies the OEM code page to be used on the target system.
 /  Incorrect code page setting can cause a file open failure.
 /
 /   437 - U.S.

@@ -1,0 +1,172 @@
+# hwpass_protected_paths_manifest.txt
+#
+# Machine-checkable inventory of production paths covered by a hardware-
+# accepted checkpoint. Consumed by cmake/m1_01/verify_hwpass_protected_paths.sh
+# (POST_BUILD). Maintained by hand; changing ACCEPTED_CHECKPOINT or the
+# PROTECTED/FORBIDDEN_SRC set is a deliberate architectural act that MUST
+# accompany a new tracked hardware-acceptance record under
+# documentation/hardware-acceptance/ and a new annotated checkpoint/* tag.
+# There is no other sanctioned way to move this file's baseline.
+#
+# Sections:
+#   ACCEPTED_CHECKPOINT <ref>        -- the single git ref (tag or commit)
+#                                        every PROTECTED path is diffed
+#                                        against. Must resolve in this repo.
+#   PROTECTED <SUBSYS> <path>        -- a production file or directory that
+#                                        must be byte-identical to its content
+#                                        at ACCEPTED_CHECKPOINT. <path> may be
+#                                        a directory; test/ subdirectories are
+#                                        never listed, so a diff here is always
+#                                        a production change, never test-only.
+#   FORBIDDEN_SYM <SUBSYS> <symbol>  -- must NOT be a defined text symbol in
+#                                        the linked ELF (checked only when the
+#                                        guard is run POST_BUILD with an nm
+#                                        tool + ELF path; a bare source-text
+#                                        mention -- e.g. a comment containing the
+#                                        symbol name -- is deliberately
+#                                        NOT a match, matching the reasoning
+#                                        in verify_hwpass_protected_paths.sh).
+#
+# Subsystem tags: MFC, LFRFID, SUBGHZ, STORAGE, LED, WIFI_UI, BUILD, SHARED.
+# SHARED = a single file that is a load-bearing dependency of more than one
+# hardware-accepted subsystem (e.g. shared MSP timer/GPIO init); a diff there
+# invalidates every subsystem listed in its comment, not just one.
+# BUILD = compilation-membership / guard wiring for the accepted subsystems.
+
+ACCEPTED_CHECKPOINT checkpoint/company-main-0810-hwpass
+
+# ---- MFC (MIFARE Classic) -- sole RAWOWN/Crypto1 backend, HARDENING-004 ----
+PROTECTED MFC m1_csrc/m1_nfc.c
+PROTECTED MFC NFC/NFC_drv/legacy/nfc_driver.c
+PROTECTED MFC NFC/NFC_drv/legacy/nfc_driver.h
+PROTECTED MFC NFC/NFC_drv/legacy/nfc_poller.c
+PROTECTED MFC NFC/NFC_drv/legacy/nfc_poller.h
+PROTECTED MFC NFC/NFC_drv/legacy/nfc_listener.c
+PROTECTED MFC NFC/NFC_drv/legacy/nfc_listener.h
+PROTECTED MFC NFC/NFC_drv/common/nfc_storage.c
+PROTECTED MFC NFC/NFC_drv/common/nfc_storage.h
+PROTECTED MFC NFC/NFC_drv/common/m1_mfc_raw_session_hw.c
+PROTECTED MFC NFC/NFC_drv/common/m1_mfc_raw_session_hw.h
+PROTECTED MFC NFC/NFC_drv/common/m1_mfc_raw_listener.c
+PROTECTED MFC NFC/NFC_drv/common/m1_mfc_raw_listener.h
+PROTECTED MFC NFC/NFC_drv/common/m1_mfc_session.c
+PROTECTED MFC NFC/NFC_drv/common/m1_mfc_session.h
+PROTECTED MFC NFC/NFC_drv/common/ce_mfc.c
+PROTECTED MFC NFC/NFC_drv/common/ce_mfc.h
+PROTECTED MFC NFC/NFC_drv/common/ce_mfc_xport.c
+PROTECTED MFC NFC/NFC_drv/common/ce_mfc_xport.h
+PROTECTED MFC NFC/NFC_drv/common/crypto1.c
+PROTECTED MFC NFC/NFC_drv/common/crypto1.h
+PROTECTED MFC NFC/NFC_drv/common/m1_mfc_dma.c
+PROTECTED MFC NFC/NFC_drv/common/m1_mfc_dma.h
+PROTECTED MFC NFC/NFC_drv/common/m1_mfc_fast.c
+PROTECTED MFC NFC/NFC_drv/common/m1_mfc_fast.h
+PROTECTED MFC NFC/NFC_drv/common/m1_mfc_emu_image.c
+PROTECTED MFC NFC/NFC_drv/common/m1_mfc_emu_image.h
+PROTECTED MFC NFC/NFC_drv/common/m1_nfc_raw_hal.c
+PROTECTED MFC NFC/NFC_drv/common/m1_nfc_raw_hal.h
+PROTECTED MFC NFC/Middlewares/ST/rfal/Src/rfal_nfc.c
+PROTECTED MFC cmake/m1_01/mfc_authoritative_manifest.txt
+PROTECTED MFC cmake/m1_01/verify_mfc_arch.sh
+PROTECTED MFC cmake/m1_01/verify_mfc_raw_hwpass.sh
+
+# ---- LF RFID (protocol encoders, GPDMA2 transport, T5577, saved/live routing) ----
+PROTECTED LFRFID lfrfid/lfrfid.c
+PROTECTED LFRFID lfrfid/lfrfid.h
+PROTECTED LFRFID lfrfid/lfrfid_protocol.c
+PROTECTED LFRFID lfrfid/lfrfid_protocol.h
+PROTECTED LFRFID lfrfid/lfrfid_protocol_em4100.c
+PROTECTED LFRFID lfrfid/lfrfid_protocol_em4100.h
+PROTECTED LFRFID lfrfid/lfrfid_protocol_h10301.c
+PROTECTED LFRFID lfrfid/lfrfid_protocol_h10301.h
+PROTECTED LFRFID lfrfid/lfrfid_protocol_hid_generic.c
+PROTECTED LFRFID lfrfid/lfrfid_protocol_hid_generic.h
+PROTECTED LFRFID lfrfid/lfrfid_protocol_hid_ex_generic.c
+PROTECTED LFRFID lfrfid/lfrfid_protocol_hid_ex_generic.h
+PROTECTED LFRFID lfrfid/lfrfid_protocol_awid.c
+PROTECTED LFRFID lfrfid/lfrfid_protocol_awid.h
+PROTECTED LFRFID lfrfid/lfrfid_protocol_ioprox.c
+PROTECTED LFRFID lfrfid/lfrfid_protocol_ioprox.h
+PROTECTED LFRFID lfrfid/lfrfid_protocol_keri.c
+PROTECTED LFRFID lfrfid/lfrfid_protocol_keri.h
+PROTECTED LFRFID lfrfid/lfrfid_protocol_pyramid.c
+PROTECTED LFRFID lfrfid/lfrfid_protocol_pyramid.h
+PROTECTED LFRFID lfrfid/lfrfid_protocol_securakey.c
+PROTECTED LFRFID lfrfid/lfrfid_protocol_securakey.h
+PROTECTED LFRFID lfrfid/lfrfid_protocol_jablotron.c
+PROTECTED LFRFID lfrfid/lfrfid_protocol_jablotron.h
+PROTECTED LFRFID lfrfid/lfrfid_protocol_nexwatch.c
+PROTECTED LFRFID lfrfid/lfrfid_protocol_nexwatch.h
+PROTECTED LFRFID lfrfid/lfrfid_protocol_fdx_b.c
+PROTECTED LFRFID lfrfid/lfrfid_protocol_fdx_b.h
+PROTECTED LFRFID lfrfid/lfrfid_dma_tx.c
+PROTECTED LFRFID lfrfid/lfrfid_dma_tx.h
+PROTECTED LFRFID lfrfid/lfrfid_dma_types.h
+PROTECTED LFRFID lfrfid/lfrfid_hal.c
+PROTECTED LFRFID lfrfid/lfrfid_hal.h
+PROTECTED LFRFID lfrfid/t5577.c
+PROTECTED LFRFID lfrfid/t5577.h
+PROTECTED LFRFID lfrfid/lfrfid_file.c
+PROTECTED LFRFID lfrfid/lfrfid_file.h
+PROTECTED LFRFID m1_csrc/m1_rfid.c
+FORBIDDEN_SYM LFRFID lfrfid_fsk_osc
+
+# ---- Sub-GHz (radio config/freq select, SI4463, RF SPI, TIM1 capture, ring
+#      buffer, record/save/load/replay, UI/nav) ----
+PROTECTED SUBGHZ m1_csrc/m1_sub_ghz.c
+PROTECTED SUBGHZ m1_csrc/m1_sub_ghz.h
+PROTECTED SUBGHZ m1_csrc/m1_subghz_recordraw_draw.c
+PROTECTED SUBGHZ m1_csrc/m1_subghz_recordraw_draw.h
+PROTECTED SUBGHZ m1_csrc/m1_subghz_scan_draw.c
+PROTECTED SUBGHZ m1_csrc/m1_subghz_scan_draw.h
+PROTECTED SUBGHZ m1_csrc/m1_subghz_fcc.c
+PROTECTED SUBGHZ m1_csrc/m1_subghz_fcc.h
+PROTECTED SUBGHZ m1_csrc/m1_rf_spi.c
+PROTECTED SUBGHZ m1_csrc/m1_rf_spi.h
+PROTECTED SUBGHZ m1_csrc/m1_ring_buffer.c
+PROTECTED SUBGHZ m1_csrc/m1_ring_buffer.h
+PROTECTED SUBGHZ Sub_Ghz/m1_sub_ghz_api.c
+PROTECTED SUBGHZ Sub_Ghz/m1_sub_ghz_api.h
+PROTECTED SUBGHZ Sub_Ghz/m1_sub_ghz_decenc.c
+PROTECTED SUBGHZ Sub_Ghz/m1_sub_ghz_decenc.h
+PROTECTED SUBGHZ Sub_Ghz/m1_sub_ghz_si4463_patch.h
+PROTECTED SUBGHZ Sub_Ghz/si446x_cmd.h
+PROTECTED SUBGHZ Sub_Ghz/datatypes_utils.c
+PROTECTED SUBGHZ Sub_Ghz/datatypes_utils.h
+PROTECTED SUBGHZ Sub_Ghz/modules
+PROTECTED SUBGHZ Sub_Ghz/protocols
+PROTECTED SUBGHZ Sub_Ghz/radio_config
+
+# ---- Storage/browser and LED (shared subsystems used by validated paths) ----
+PROTECTED STORAGE m1_csrc/m1_file_browser.c
+PROTECTED STORAGE m1_csrc/m1_file_browser.h
+PROTECTED STORAGE m1_csrc/m1_sdcard.c
+PROTECTED STORAGE m1_csrc/m1_sdcard.h
+PROTECTED STORAGE m1_csrc/m1_sdcard_man.c
+PROTECTED STORAGE m1_csrc/m1_sdcard_man.h
+PROTECTED LED m1_csrc/m1_system.c
+PROTECTED LED m1_csrc/m1_led_indicator.c
+PROTECTED LED m1_csrc/m1_led_indicator.h
+PROTECTED LED m1_csrc/m1_led_priority.c
+PROTECTED LED m1_csrc/m1_led_priority.h
+PROTECTED LED m1_csrc/m1_lp5814.c
+PROTECTED LED m1_csrc/m1_lp5814.h
+
+# ---- Wi-Fi / MonstaShark shared presentation and navigation ----
+PROTECTED WIFI_UI m1_csrc/m1_wifi.c
+PROTECTED WIFI_UI m1_csrc/m1_wifi.h
+PROTECTED WIFI_UI m1_csrc/m1_capture_link.c
+PROTECTED WIFI_UI m1_csrc/m1_menu.c
+
+# ---- Shared cross-subsystem dependency ----
+# TIM1 MspInit (Sub-GHz RAW capture) and TIM3 MspInit (LF RFID PWM) are
+# configured in this single shared HAL file; a change here can silently
+# break either accepted subsystem's timing without touching a file named
+# after it. Affects: SUBGHZ, LFRFID.
+PROTECTED SHARED Core/Src/stm32h5xx_hal_msp.c
+
+# ---- Build/guard wiring for the accepted subsystems ----
+PROTECTED BUILD CMakeLists.txt
+PROTECTED BUILD cmake/m1_01/CMakeLists.txt
+PROTECTED BUILD cmake/m1_01/hwpass_protected_paths_manifest.txt
+PROTECTED BUILD cmake/m1_01/verify_hwpass_protected_paths.sh

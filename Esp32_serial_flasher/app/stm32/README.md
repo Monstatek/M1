@@ -1,5 +1,3 @@
-<!-- See COPYING.txt for license details. -->
-
 # STM32 Example
 
 ## Overview

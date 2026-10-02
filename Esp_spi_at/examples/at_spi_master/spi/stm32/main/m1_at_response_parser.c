@@ -1,12 +1,10 @@
-/* See COPYING.txt for license details. */
-
 /*
 *
 * m1_at_response_parser.c
 *
 * M1 parser for EPS32 module
 *
-* M1 Project
+* B.N @ MonstaTek, Jul 2025
 *
 */
 

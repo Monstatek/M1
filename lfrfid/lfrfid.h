@@ -108,9 +108,15 @@ typedef struct {
     //uint8_t  level;   
 } lfrfid_evt_t;
 
+/* Maximum LF RFID decoded-credential size, in bytes. Sized to the largest
+ * supported protocol data_size (GProxII = 12; its canonical form is the raw
+ * 96-bit frame). All credential storage derives its size from this constant or
+ * sizeof(uid); never hard-code the byte count. */
+#define LFRFID_MAX_DATA_SIZE 12
+
 typedef struct
 {
-	uint8_t 	uid[5];
+	uint8_t 	uid[LFRFID_MAX_DATA_SIZE];
 	uint8_t     protocol;
 	uint16_t	bitrate;
 	uint8_t		modulation;
@@ -136,10 +142,11 @@ typedef enum {
 
 #define LFRFID_WRITE_ERROR_COUNT	(10)
 
-extern lfrfid_state_t lfrfid_state;
+extern volatile lfrfid_state_t lfrfid_state;
 
 extern LFRFID_TAG_INFO lfrfid_tag_info;
 extern LFRFID_TAG_INFO *lfrfid_tag_info_back;
+extern uint8_t lfrfid_pettag_mode;   /* 1 = Pet Tag 134.2 kHz FDX-B-only read */
 extern LFRFIDProgram *lfrfid_program;
 extern uint32_t lfrfid_write_count;
 
@@ -155,5 +162,17 @@ void bytes_to_u32_array(BitOrder order, const uint8_t in_data[], uint32_t out_da
 //#include "lfrfid_protocol_detect.h"
 #include "lfrfid_protocol_em4100.h"
 #include "lfrfid_protocol_h10301.h"
+#include "lfrfid_protocol_pyramid.h"
+#include "lfrfid_protocol_ioprox.h"
+#include "lfrfid_protocol_awid.h"
+#include "lfrfid_protocol_securakey.h"
+#include "lfrfid_protocol_jablotron.h"
+#include "lfrfid_protocol_fdx_b.h"
+#include "lfrfid_protocol_hid_generic.h"
+#include "lfrfid_protocol_hid_ex_generic.h"
+#include "lfrfid_protocol_keri.h"
+#if defined(LFRFID_NEXWATCH_ENABLED)
+#include "lfrfid_protocol_nexwatch.h"
+#endif
 
 #endif /* LFRFID_H_ */

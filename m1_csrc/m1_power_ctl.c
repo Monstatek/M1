@@ -37,7 +37,6 @@ static const char * BQ2589X_VBUS_STAT_MSG[8] = {"No input", "USB Host SDP", "Ada
 static const char * BQ2589X_CHRG_STAT_MSG[4] = {"Not charging", "Pre-charge", "Fast Charge", "Complete"};
 #endif
 
-#define DELAY_BEFORE_POWER_REBOOT		1000 // ms
 
 //************************** S T R U C T U R E S *******************************
 
@@ -46,6 +45,7 @@ enum {
 	VIEW_MODE_BATTERY_INFO,
 	VIEW_MODE_POWER_REBOOT,
 	VIEW_MODE_POWER_SHUTDOWN,
+//	VIEW_MODE_BATTERY_GOLDEN_IMAGE,
 	VIEW_MODE_BATTERY_END
 };
 
@@ -63,6 +63,8 @@ void menu_setting_power_exit(void);
 void power_battery_info(void);
 void power_reboot(void);
 void power_off(void);
+void battery_golden_image(void);
+
 //void power_init(void);
 void m1_pre_power_down(void);
 static void m1_system_drivers_disable(void);
@@ -85,7 +87,7 @@ static int power_reboot_gui_message(void);
 static void power_shutdown_gui_init(void);
 static void power_shutdown_gui_create(uint8_t param);
 static void power_shutdown_gui_destroy(uint8_t param);
-static void power_shutdown_gui_update(uint8_t param);
+void power_shutdown_gui_update(uint8_t param);
 static int power_shutdown_gui_message(void);
 
 static void battery_info_timer(TimerHandle_t xTimer);
@@ -301,6 +303,7 @@ static void battery_info_gui_update(uint8_t param)
 
         u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_TXT);
 
+        uint8_t ui_soh = app_get_filtered_soh_ui();
         // 16 x 6
         m1_draw_text(&m1_u8g2, 7, 47,18, res_string(IDS_L), TEXT_ALIGN_CENTER);
         sprintf(stat_msg, "%u%%", SystemPowerStatus.battery_level);
@@ -316,7 +319,7 @@ static void battery_info_gui_update(uint8_t param)
         m1_draw_text(&m1_u8g2, 65, 60, 30, stat_msg, TEXT_ALIGN_CENTER);
 
         m1_draw_text(&m1_u8g2, 103, 47,18, res_string(IDS_H), TEXT_ALIGN_CENTER);
-        sprintf(stat_msg, "%u%%", SystemPowerStatus.battery_health);
+        sprintf(stat_msg, "%u%%", ui_soh);
         m1_draw_text(&m1_u8g2, 97, 60, 30, stat_msg, TEXT_ALIGN_CENTER);
 
         int str_id = IDS_USER_DEFINED;
@@ -591,7 +594,7 @@ static void power_shutdown_gui_destroy(uint8_t param)
   * @retval
  */
 /*============================================================================*/
-static void power_shutdown_gui_update(uint8_t param)
+void power_shutdown_gui_update(uint8_t param)
 {
 	/* Graphic work starts here */
 	u8g2_FirstPage(&m1_u8g2);
@@ -711,6 +714,7 @@ void m1_pre_power_down(void)
 static void m1_system_drivers_disable(void)
 {
 	;
+	// Deinit SD card driver
 } // static void m1_system_drivers_disable(void)
 
 

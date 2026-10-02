@@ -44,6 +44,20 @@ static uint32_t s_time_end;
 
 esp_loader_error_t loader_port_write(const uint8_t *data, uint16_t size, uint32_t timeout)
 {
+#ifdef M1_RING_BUFFER_H_
+    /* This protocol is strictly synchronous request/response (the ROM never
+     * sends unsolicited bytes) -- see m1_manager_espupdate.c's espu_be_write()
+     * for the full reasoning, which already applies this same defensive
+     * drain once per outer (3x) retry. Every loader_port_write() call begins
+     * a brand-new command (SLIP_send_delimiter() + this write is always the
+     * first thing send_cmd() does), so NOTHING should legitimately be
+     * sitting in the RX ring buffer at this point either -- extending the
+     * drain to fire here, before every single command (not just every outer
+     * retry), catches the same stale-byte/misframing failure mode at the
+     * finest granularity actually available without modifying vendored
+     * esp_loader.c's own internal retry loop. */
+    m1_ringbuffer_reset(&esp32_rb_hdl);
+#endif
     HAL_StatusTypeDef err = HAL_UART_Transmit(uart, (uint8_t *)data, size, timeout);
 
     if (err == HAL_OK) {
@@ -75,16 +89,29 @@ esp_loader_error_t loader_port_read(uint8_t *data, uint16_t size, uint32_t timeo
         return ESP_LOADER_ERROR_FAIL;
     }
 #else
+	/* m1_ringbuffer_read() is a PARTIAL read - it returns whatever is available
+	 * right now, up to `size`, but the original loop here returned as soon as it
+	 * got ANY nonzero amount, even less than `size`. esp_loader/slip.c currently
+	 * only ever calls loader_port_read() with size=1 (byte-at-a-time SLIP framing),
+	 * so that bug happened not to bite in practice - but the function's contract is
+	 * "read exactly `size` bytes", and a future/other caller requesting size>1
+	 * would silently get a truncated buffer. Accumulate across ring-buffer reads
+	 * until `size` bytes are collected or the timeout elapses, so the function
+	 * actually honors its contract. */
 	size_t to = HAL_GetTick();
-	uint16_t read_n = 0;
-	while ( !read_n )
+	uint16_t got = 0;
+	while ( got < size )
 	{
-		read_n = m1_ringbuffer_read(& esp32_rb_hdl, data, size);
+		uint16_t n = m1_ringbuffer_read(& esp32_rb_hdl, &data[got], (uint16_t)(size - got));
+		got = (uint16_t)(got + n);
+		if ( got >= size )
+			break;
 		if ( (HAL_GetTick() - to) > timeout )
 			break;
-		HAL_Delay(10); // Give time for other tasks
-	} // while ( !read_n )
-	if ( read_n )
+		if ( !n )
+			HAL_Delay(1); // no data yet; yield briefly before polling again
+	} // while ( got < size )
+	if ( got >= size )
 	{
 #if SERIAL_FLASHER_DEBUG_TRACE
         transfer_debug_print(data, size, false);

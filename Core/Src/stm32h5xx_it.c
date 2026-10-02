@@ -22,6 +22,7 @@
 #include "stm32h5xx_it.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "m1_fault_report.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -42,6 +43,19 @@
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN PV */
 
+volatile uint32_t g_hardfault_r0;
+volatile uint32_t g_hardfault_r1;
+volatile uint32_t g_hardfault_r2;
+volatile uint32_t g_hardfault_r3;
+volatile uint32_t g_hardfault_r12;
+volatile uint32_t g_hardfault_lr;
+volatile uint32_t g_hardfault_pc;
+volatile uint32_t g_hardfault_psr;
+volatile uint32_t g_hardfault_cfsr;
+volatile uint32_t g_hardfault_hfsr;
+volatile uint32_t g_hardfault_bfar;
+volatile uint32_t g_hardfault_mmfar;
+volatile uint32_t g_hardfault_sp;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -89,13 +103,70 @@ void NMI_Handler(void)
   /* USER CODE END NonMaskableInt_IRQn 1 */
 }
 
+
+void prvGetRegistresFromFault(uint32_t *pulFaultStackAddress) {
+    /* These are the registers stacked by the Cortex-M hardware on exception entry */
+    volatile uint32_t r0  = pulFaultStackAddress[0];
+    volatile uint32_t r1  = pulFaultStackAddress[1];
+    volatile uint32_t r2  = pulFaultStackAddress[2];
+    volatile uint32_t r3  = pulFaultStackAddress[3];
+    volatile uint32_t r12 = pulFaultStackAddress[4];
+    volatile uint32_t lr  = pulFaultStackAddress[5]; /* Link Register (return address) */
+    volatile uint32_t pc  = pulFaultStackAddress[6]; /* Program Counter (fault address) */
+    volatile uint32_t psr = pulFaultStackAddress[7];
+
+    /* Force a breakpoint here so the IDE stops with variables loaded */
+    __asm volatile("bkpt #0");
+
+    while(1);
+}
+
+
 /**
   * @brief This function handles Hard fault interrupt.
   */
-void HardFault_Handler(void)
+__attribute__((naked)) void HardFault_Handler(void)
 {
+//  __asm volatile (
+//    "tst lr, #4            \n"
+//    "ite eq                \n"
+//    "mrseq r0, msp         \n"
+//    "mrsne r0, psp         \n"
+//    "b HardFault_Handler_C \n"
+//  );
+
+    __asm volatile (
+        "tst lr, #4 \n"          /* Check EXC_RETURN bit 2 to see which stack was used */
+        "ite eq \n"
+        "mrseq r0, msp \n"       /* Enters here if MSP was used (e.g. inside an ISR) */
+        "mrsne r0, psp \n"       /* Enters here if PSP was used (inside a FreeRTOS task) */
+        "ldr r1, [r0, #24] \n"   /* Read saved PC (Program Counter) from the stack frame */
+        "ldr r2, =prvGetRegistresFromFault \n"
+        "bx r2 \n"
+    );
+}
+
+void HardFault_Handler_C(uint32_t *stacked_regs)
+{
+  g_hardfault_r0 = stacked_regs[0];
+  g_hardfault_r1 = stacked_regs[1];
+  g_hardfault_r2 = stacked_regs[2];
+  g_hardfault_r3 = stacked_regs[3];
+  g_hardfault_r12 = stacked_regs[4];
+  g_hardfault_lr = stacked_regs[5];
+  g_hardfault_pc = stacked_regs[6];
+  g_hardfault_psr = stacked_regs[7];
+  g_hardfault_sp = (uint32_t)stacked_regs;
+  g_hardfault_cfsr = SCB->CFSR;
+  g_hardfault_hfsr = SCB->HFSR;
+  g_hardfault_bfar = SCB->BFAR;
+  g_hardfault_mmfar = SCB->MMFAR;
   /* USER CODE BEGIN HardFault_IRQn 0 */
 	static volatile int _go_db;
+
+	/* Best-effort: show the fault status + capture checkpoint on the display so
+	 * the crash is diagnosable on-device (see m1_fault_report / g_cap_checkpoint). */
+	m1_fault_report("HARDFAULT");
 
 	_go_db = 0;
 
@@ -105,7 +176,7 @@ void HardFault_Handler(void)
   /* USER CODE END HardFault_IRQn 0 */
   while (1)
   {
-    /* USER CODE BEGIN W1_HardFault_IRQn 0 */
+    /* USER CODE BEGIN W1_HardFault_IRQn 0 *
     /* USER CODE END W1_HardFault_IRQn 0 */
   }
 }
@@ -116,7 +187,11 @@ void HardFault_Handler(void)
 void MemManage_Handler(void)
 {
   /* USER CODE BEGIN MemoryManagement_IRQn 0 */
-
+  g_hardfault_cfsr = SCB->CFSR;
+  g_hardfault_hfsr = SCB->HFSR;
+  g_hardfault_mmfar = SCB->MMFAR;
+  g_hardfault_bfar = SCB->BFAR;
+  m1_fault_report("MEMMANAGE");
   /* USER CODE END MemoryManagement_IRQn 0 */
   while (1)
   {
@@ -131,7 +206,11 @@ void MemManage_Handler(void)
 void BusFault_Handler(void)
 {
   /* USER CODE BEGIN BusFault_IRQn 0 */
-
+  g_hardfault_cfsr = SCB->CFSR;
+  g_hardfault_hfsr = SCB->HFSR;
+  g_hardfault_mmfar = SCB->MMFAR;
+  g_hardfault_bfar = SCB->BFAR;
+  m1_fault_report("BUSFAULT");
   /* USER CODE END BusFault_IRQn 0 */
   while (1)
   {
@@ -146,7 +225,11 @@ void BusFault_Handler(void)
 void UsageFault_Handler(void)
 {
   /* USER CODE BEGIN UsageFault_IRQn 0 */
-
+  g_hardfault_cfsr = SCB->CFSR;
+  g_hardfault_hfsr = SCB->HFSR;
+  g_hardfault_mmfar = SCB->MMFAR;
+  g_hardfault_bfar = SCB->BFAR;
+  m1_fault_report("USAGEFAULT");
   /* USER CODE END UsageFault_IRQn 0 */
   while (1)
   {

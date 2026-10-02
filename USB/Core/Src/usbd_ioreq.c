@@ -15,6 +15,8 @@
   *
   ******************************************************************************
   */
+#pragma GCC push_options
+#pragma GCC optimize("O0")
 
 /* Includes ------------------------------------------------------------------*/
 #include "usbd_ioreq.h"
@@ -221,4 +223,5 @@ uint32_t USBD_GetRxCount(USBD_HandleTypeDef *pdev, uint8_t ep_addr)
 /**
   * @}
   */
+#pragma GCC push_options
 

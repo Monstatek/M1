@@ -1,0 +1,112 @@
+{
+  "description": "Gate C .m1pkg validation fixtures. expect = FW_VALIDATE result; versions = expected fw/resource on NONE. HOST expectations only - do not imply FatFs/SD/MSC/physical validation.",
+  "format": "m1pkg v1 (48-byte header, see documentation/M1CP_web_manager.md section 5)",
+  "target": {
+    "devid": "0x0484",
+    "flash_bank_size": 1048576
+  },
+  "generator": "tests/m1pkg/gen_fixtures.js",
+  "fixtures": [
+    {
+      "name": "valid.m1pkg",
+      "bytes": 432,
+      "expect": "NONE",
+      "versions": {
+        "fw": "0.8.0.4",
+        "resource": "0.8.1.0"
+      },
+      "sha256": "2b99b5b68eebf48092adac2cd7060ddab89797b3f69dab4d08d0525c0cc2e50a"
+    },
+    {
+      "name": "bad_magic.m1pkg",
+      "bytes": 432,
+      "expect": "BAD_PAYLOAD",
+      "versions": null,
+      "sha256": "92d4ba503df301197e3c6d758b6eea506748a22df1443058e99291c04d6b51c6"
+    },
+    {
+      "name": "bad_format.m1pkg",
+      "bytes": 432,
+      "expect": "INCOMPATIBLE",
+      "versions": null,
+      "sha256": "7f67a0853c78538c8b6c4d675780842c1ff396e848429ba44d1adbbc1072e020"
+    },
+    {
+      "name": "bad_header_crc.m1pkg",
+      "bytes": 432,
+      "expect": "INTEGRITY",
+      "versions": null,
+      "sha256": "7e8f2ba98111f5f7319957cdccaf6030ac4e7eea2fda9cfd77fa22ce618c5e27"
+    },
+    {
+      "name": "truncated.m1pkg",
+      "bytes": 428,
+      "expect": "BAD_PAYLOAD",
+      "versions": null,
+      "sha256": "9b02aefd1849585019602449abb525620481c5d78a2c17bc75a72c9ee418c0bf"
+    },
+    {
+      "name": "trailing_data.m1pkg",
+      "bytes": 440,
+      "expect": "BAD_PAYLOAD",
+      "versions": null,
+      "sha256": "0356c5b1802c606d17f656051c46e00cb4d6081c8e1b23645fd428c06a775061"
+    },
+    {
+      "name": "unaligned_fw.m1pkg",
+      "bytes": 430,
+      "expect": "BAD_PAYLOAD",
+      "versions": null,
+      "sha256": "5b57885c8bdcaa2528eeb1cab70611f3afcffeee49ad190d8a9231c5c13e5fad"
+    },
+    {
+      "name": "overlap.m1pkg",
+      "bytes": 432,
+      "expect": "BAD_PAYLOAD",
+      "versions": null,
+      "sha256": "28b6c4e500fa5155b3786febddf1c65b56a60294c8277783501cf9d5be4ab91b"
+    },
+    {
+      "name": "leading_gap.m1pkg",
+      "bytes": 432,
+      "expect": "BAD_PAYLOAD",
+      "versions": null,
+      "sha256": "e5c8aaee725897f09bbddb81ad1d0bc63ff328fdf6c784c74f19cad60fa61f0a"
+    },
+    {
+      "name": "missing_fw.m1pkg",
+      "bytes": 432,
+      "expect": "BAD_PAYLOAD",
+      "versions": null,
+      "sha256": "97c34a511aae2b7dbaeaf78794c6922737b2dcd18caaf55062944c0050fb03be"
+    },
+    {
+      "name": "wrong_target.m1pkg",
+      "bytes": 432,
+      "expect": "INCOMPATIBLE",
+      "versions": null,
+      "sha256": "f7629345ed8635c3ceb2e4683b59e18298abb097427f5b5ec7a5440723b69209"
+    },
+    {
+      "name": "incompatible_res.m1pkg",
+      "bytes": 432,
+      "expect": "INCOMPATIBLE",
+      "versions": null,
+      "sha256": "a2c86dbe6cc41caf6ac9f6ed732cd838df8b23702fb0ca619c2ef3a2b1c7da5c"
+    },
+    {
+      "name": "bad_fw_crc.m1pkg",
+      "bytes": 432,
+      "expect": "INTEGRITY",
+      "versions": null,
+      "sha256": "67f2292476a2f4847cea5fe7b65edf18d9ba60560cfa30dc449e6694d3273fd8"
+    },
+    {
+      "name": "bad_res_crc.m1pkg",
+      "bytes": 432,
+      "expect": "INTEGRITY",
+      "versions": null,
+      "sha256": "9a216c0473a03425bdd1fa37ae588f17d49ef14bff745a9746051b0e02b8a118"
+    }
+  ]
+}

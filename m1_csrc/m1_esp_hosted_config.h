@@ -12,7 +12,11 @@
 #define M1_ESP_HOSTED_CONFIG_H_
 
 #include "m1_io_defs.h"
-#include "sdkconfig.h"
+/* STM32<->ESP32 interface constants come from the tracked interface contract,
+ * NOT ESP-IDF's generated, git-ignored sdkconfig.h. See
+ * m1_esp_interface_contract.h for the values, their provenance, and the
+ * ESP32-Core synchronization responsibility. */
+#include "m1_esp_interface_contract.h"
 
 #define CONFIG_ESP_HOSTED_SPI_HOST_INTERFACE
 
@@ -44,8 +48,12 @@
 
 #define SOC_MMU_PAGE_SIZE							CONFIG_MMU_PAGE_SIZE
 
-#define CONFIG_ESP_HOSTED_MAX_SIMULTANEOUS_SYNC_RPC_REQUESTS	10 // Dummy number, should be adjusted properly later!
-#define CONFIG_ESP_HOSTED_MAX_SIMULTANEOUS_ASYNC_RPC_REQUESTS	10 // Dummy number, should be adjusted properly later!
+/* Max concurrent sync/async RPC requests the host tracks. Not consumed by any
+ * STM32 code path today (no RPC layer is compiled into this firmware); kept for
+ * source compatibility with the shared ESP-hosted headers. Confirm with the
+ * ESP32 Core team before relying on these for an actual RPC implementation. */
+#define CONFIG_ESP_HOSTED_MAX_SIMULTANEOUS_SYNC_RPC_REQUESTS	10
+#define CONFIG_ESP_HOSTED_MAX_SIMULTANEOUS_ASYNC_RPC_REQUESTS	10
 
 
 #define CONFIG_UNITY_FREERTOS_PRIORITY		5

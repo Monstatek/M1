@@ -39,8 +39,10 @@ enum
 };
 
 void menu_bluetooth_init(void);
-void bluetooth_config(void);
-void bluetooth_scan(void);
-void bluetooth_advertise(void);
+void menu_bluetooth_exit(void);
+void bluetooth_scan_devices(void);
+void bluetooth_signal_meter(void);
+void bluetooth_gatt_explorer(void);
+void bluetooth_saved(void);
 
 #endif /* M1_BT_H_ */

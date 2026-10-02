@@ -24,7 +24,11 @@
 #define MD5_ENABLED
 
 //This configures the amount of retries for writing blocks either to target flash or RAM.
-#define SERIAL_FLASHER_WRITE_BLOCK_RETRIES		3
+/* A long streamed flash (thousands of DATA_CMD round trips at 115200) can hit a
+ * rare transient UART glitch; 3 internal retries occasionally isn't enough (seen
+ * on-device: a block failed all 3 and aborted a ~99%-complete 1.4MB transfer).
+ * Raised for headroom; the M1CP backend adds a further outer retry on top. */
+#define SERIAL_FLASHER_WRITE_BLOCK_RETRIES		10
 
 //This is the time for which the reset pin is asserted when doing a hard reset in milliseconds.
 #define SERIAL_FLASHER_RESET_HOLD_TIME_MS		100

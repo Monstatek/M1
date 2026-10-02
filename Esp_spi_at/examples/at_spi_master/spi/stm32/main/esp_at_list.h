@@ -1,12 +1,10 @@
-/* See COPYING.txt for license details. */
-
 /*
 *
 * esp_at_list.h
 *
 * AT commands list
 *
-* M1 Project
+* B.N @ MonstaTek, Jul 2025
 *
 */
 

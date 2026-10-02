@@ -134,7 +134,7 @@ We have two bits to control the interrupt:
 #include "m1_compile_cfg.h"
 #include "m1_log_debug.h"
 
-#define DEV_NUM_MAX 1
+#define DEV_NUM_MAX 1 // B.N @ MonstaTek 2025
 
 #define SPI_TAG		"ESP_SPI"
 

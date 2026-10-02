@@ -28,6 +28,10 @@ EndBSPDependencies */
 #include "usbd_msc.h"
 #include "usbd_msc_data.h"
 
+/* M1: host-eject event flag (defined in usbd_msc_storage.c). The SCSI eject
+ * command only sets this; the storage task performs the filesystem remount. */
+extern volatile uint8_t usbmsc_host_ejected;
+
 
 /** @addtogroup STM32_USB_DEVICE_LIBRARY
   * @{
@@ -635,6 +639,9 @@ static int8_t SCSI_StartStopUnit(USBD_HandleTypeDef *pdev, uint8_t lun, uint8_t 
   else if ((params[4] & 0x3U) == 0x2U) /* START=0 and LOEJ Load Eject=1 */
   {
     hmsc->scsi_medium_state = SCSI_MEDIUM_EJECTED;
+    /* M1 hook: host requested media eject. Post the event only (no filesystem
+     * work in USB context); the storage task reclaims and remounts the card. */
+    usbmsc_host_ejected = 1U;
   }
   else if ((params[4] & 0x3U) == 0x3U) /* START=1 and LOEJ Load Eject=1 */
   {

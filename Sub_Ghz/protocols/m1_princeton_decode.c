@@ -138,7 +138,7 @@ uint8_t subghz_decode_princeton(uint16_t p, uint16_t pulsecount)
     }
     else
     {
-        M1_LOG_E(M1_LOGDB_TAG, "E: rx:%d, decoded:%d, te[i] %d\r\n", pulsecount, bits_count, subghz_decenc_ctl.pulse_times[i]);
+        /* silenced: per-packet reject log flooded console */
     	for (i=0; i<10; i++)
     		M1_LOG_N(M1_LOGDB_TAG, "%d ", subghz_decenc_ctl.pulse_times[i]);
     	M1_LOG_N(M1_LOGDB_TAG, "\r\n");

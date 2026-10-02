@@ -19,12 +19,14 @@
 #include "main.h"
 #include "m1_fw_update.h"
 #include "m1_fw_update_bl.h"
+#include "m1_esp_version.h"   /* installed Core version for the update screen */
 #include "m1_storage.h"
+#include "m1_file_browser.h"   /* m1_fb_set_sort_enabled (folders-first picker) */
+#include "m1_file_util.h"      /* fu_path_combine (bounded path join) */
 #include "m1_power_ctl.h"
 
 /*************************** D E F I N E S ************************************/
 
-#define FLASH_BL_ADDRESS	0x08000000
 
 #define M1_LOGDB_TAG		"FW-UPDATE"
 
@@ -37,7 +39,6 @@
 
 /***************************** V A R I A B L E S ******************************/
 
-typedef void (*pFunction)(void);
 
 static char *pfullpath = NULL;
 static uint8_t fw_update_status = M1_FW_UPDATE_NOT_READY;
@@ -52,7 +53,6 @@ void firmware_update_exit(void);
 void firmware_update_gui_update(const S_M1_Menu_t *phmenu, uint8_t sel_item);
 void firmware_update_get_image_file(void);
 void firmware_update_start(void);
-static void firmware_update_info_box(uint8_t sel_item);
 
 /*************** F U N C T I O N   I M P L E M E N T A T I O N ****************/
 
@@ -180,8 +180,8 @@ void firmware_update_gui_update(const S_M1_Menu_t *phmenu, uint8_t sel_item)
     	{
     		if ( i==sel_item )
     		{
-    			// Draw box for selected menu item with text color
-    			u8g2_DrawBox(&m1_u8g2, 0, menu_text_y - THIS_LCD_MENU_TEXT_ROW_SPACE + 2, M1_LCD_SUB_MENU_TEXT_FRAME_W, THIS_LCD_MENU_TEXT_ROW_SPACE);
+    			// Selected item: full-width black band with white text, consistent with the other menus.
+    			u8g2_DrawBox(&m1_u8g2, 0, menu_text_y - THIS_LCD_MENU_TEXT_ROW_SPACE + 2, M1_LCD_DISPLAY_WIDTH, THIS_LCD_MENU_TEXT_ROW_SPACE);
     			u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_BG); // set to background color
     			u8g2_SetFont(&m1_u8g2, M1_DISP_SUB_MENU_FONT_B);
     			u8g2_DrawStr(&m1_u8g2, 4, menu_text_y, phmenu->submenu[i]->title);
@@ -195,8 +195,30 @@ void firmware_update_gui_update(const S_M1_Menu_t *phmenu, uint8_t sel_item)
     		menu_text_y += THIS_LCD_MENU_TEXT_ROW_SPACE;
     	} // for (i=0; i<n_items; i++)
 
-    	// Draw info box at the bottom
-    	m1_info_box_display_init(true);
+        /* Draw the status frame only when a status message is present. */
+        /* Idle (no file selected yet): show the installed firmware versions
+         * from authoritative runtime/stored values (not hard-coded). Core is
+         * independently versioned; show the concise product version, or an
+         * honest unavailable state when it is not known. */
+        if ( fw_update_status == M1_FW_UPDATE_NOT_READY )
+        {
+            uint8_t ev[4];
+            m1_info_box_display_init(true);
+            sprintf((char *)prn_name, "STM32 %u.%u.%u.%u",
+                    m1_device_stat.config.fw_version_major, m1_device_stat.config.fw_version_minor,
+                    m1_device_stat.config.fw_version_build, m1_device_stat.config.fw_version_rc);
+            m1_info_box_display_draw(INFO_BOX_ROW_1, prn_name);
+            /* Core is independently versioned. Show the line only when an
+             * authoritative value is recorded (set by a Web-Manager ESP update);
+             * when unknown, omit it entirely rather than show a status that reads
+             * like a fault. Never hard-coded, never shown as the STM32 version. */
+            if ( m1cp_esp_version_get(ev) )
+            {
+                sprintf((char *)prn_name, "Core %u.%u", ev[0], ev[1]);
+                m1_info_box_display_draw(INFO_BOX_ROW_2, prn_name);
+            }
+        }
+
 
     	switch ( sel_item )
     	{
@@ -218,6 +240,7 @@ void firmware_update_gui_update(const S_M1_Menu_t *phmenu, uint8_t sel_item)
     	    	switch (fw_update_status)
     	    	{
     	    		case M1_FW_UPDATE_READY:
+                        m1_info_box_display_init(true);
     	    			m1_info_box_display_draw(INFO_BOX_ROW_1, prn_name);
         				sprintf(prn_name, "New ver. %d.%d.%d.%d", (uint8_t)(fw_version_new>>24), (uint8_t)(fw_version_new>>16), (uint8_t)(fw_version_new>>8), (uint8_t)fw_version_new);
         				m1_info_box_display_draw(INFO_BOX_ROW_2, prn_name);
@@ -226,23 +249,28 @@ void firmware_update_gui_update(const S_M1_Menu_t *phmenu, uint8_t sel_item)
     	    			break;
 
     	    		case M1_FW_IMAGE_FILE_ACCESS_ERROR:
+                        m1_info_box_display_init(true);
         				m1_info_box_display_draw(INFO_BOX_ROW_1, "Image access error!");
         				break;
 
     	    		case M1_FW_IMAGE_FILE_TYPE_ERROR:
         			case M1_FW_IMAGE_SIZE_INVALID:
+                        m1_info_box_display_init(true);
         				m1_info_box_display_draw(INFO_BOX_ROW_1, "Invalid image file!");
         				break;
 
         			case M1_FW_VERSION_ERROR:
+                        m1_info_box_display_init(true);
         				m1_info_box_display_draw(INFO_BOX_ROW_1, "Image version error!");
         				break;
 
         			case M1_FW_ISM_BAND_REGION_ERROR:
+                        m1_info_box_display_init(true);
         				m1_info_box_display_draw(INFO_BOX_ROW_1, "ISM region error!");
         				break;
 
         			case M1_FW_CRC_CHECKSUM_UNMATCHED:
+                        m1_info_box_display_init(true);
         				m1_info_box_display_draw(INFO_BOX_ROW_1, "CRC failed!");
         				break;
 
@@ -255,21 +283,25 @@ void firmware_update_gui_update(const S_M1_Menu_t *phmenu, uint8_t sel_item)
 		    	switch (fw_update_status)
 		    	{
 		    		case M1_FW_UPDATE_READY:
+                        m1_info_box_display_init(true);
 		    			m1_info_box_display_draw(INFO_BOX_ROW_1, "Ready to flash!");
 		    			break;
 
 		    		case M1_FW_UPDATE_SUCCESS:
-		    			m1_info_box_display_draw(INFO_BOX_ROW_1, "Update successfully!");
+                        m1_info_box_display_init(true);
+		    			m1_info_box_display_draw(INFO_BOX_ROW_1, "Update successful!");
 		    			fw_update_status = M1_FW_UPDATE_NOT_READY; // Reset after process complete
 		    			f_info->file_is_selected = false; // Reset
 		    			// Display warning message: device will reboot in n seconds...
 		    			break;
 
 		    		case M1_FW_UPDATE_FAILED:
+                        m1_info_box_display_init(true);
 		    			m1_info_box_display_draw(INFO_BOX_ROW_1, "Update failed!");
 		    			break;
 
         			case M1_FW_UPDATE_LOW_BATTERY:
+                        m1_info_box_display_init(true);
         				m1_info_box_display_draw(INFO_BOX_ROW_1, "Battery level < 50%!");
         				break;
 
@@ -302,6 +334,7 @@ void firmware_update_get_image_file(void)
     uint32_t crc32ret, image_size, fwver_old;
     S_M1_FW_CONFIG_t fwconfig;
 
+	m1_fb_set_sort_enabled(true);   /* folders first, then files (auto-cleared on deinit) */
 	f_info = storage_browse();
 
 	fw_update_status = M1_FW_IMAGE_FILE_TYPE_ERROR; // reset
@@ -335,14 +368,25 @@ void firmware_update_get_image_file(void)
         	break;
         }
 
-		u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_BG); // set to background color
-		// Draw box with background color to clear the area for the hourglass icon
-		u8g2_DrawBox(&m1_u8g2, M1_LCD_DISPLAY_WIDTH - 28, THIS_LCD_MENU_TEXT_FIRST_ROW_Y + THIS_LCD_MENU_TEXT_ROW_SPACE + 2, 24, THIS_LCD_MENU_TEXT_ROW_SPACE);
-		u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_TXT); // return to text color
-    	u8g2_DrawXBMP(&m1_u8g2, M1_LCD_DISPLAY_WIDTH - 24, 16, 18, 32, hourglass_18x32); // Draw icon
-    	m1_u8g2_nextpage(); // Update display RAM
+        /* "Preparing..." wait screen while the image open + size/CRC validation
+         * below runs (a few seconds on a large image). Clear the file-browser
+         * screen behind us, then show the hourglass centered above a centered
+         * label -- no frame box. Display-only; flash transport unchanged.
+         * Restores the indicator removed in f6685f8b, reworded. */
+        {
+            const char *prep_msg = "Preparing...";
+            int prep_w;
+            u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_BG);
+            u8g2_DrawBox(&m1_u8g2, 0, 0, 128, 64);
+            u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_TXT);
+            u8g2_DrawXBMP(&m1_u8g2, (128 - 16) / 2, 10, 16, 29, hourglass_16x29);
+            u8g2_SetFont(&m1_u8g2, M1_DISP_SUB_MENU_FONT_N);
+            prep_w = (int)u8g2_GetStrWidth(&m1_u8g2, prep_msg);
+            u8g2_DrawStr(&m1_u8g2, (128 - prep_w) / 2, 52, prep_msg);
+            m1_u8g2_nextpage();
+        }
 
-        uret = m1_fb_dyn_strcat(pfullpath, 2, "",  f_info->dir_name, f_info->file_name);
+        fu_path_combine(pfullpath, FW_FILE_PATH_LEN_MAX + FW_FILE_NAME_LEN_MAX, f_info->dir_name, f_info->file_name);
         uret = m1_fb_open_file(&hfile_fw, pfullpath);
 		if ( !uret )
 		{
@@ -445,107 +489,3 @@ void firmware_update_get_image_file(void)
 	xQueueReset(main_q_hdl); // Reset main q before return
 
 } // void firmware_update_get_image_file(void)
-
-
-
-/*============================================================================*/
-/*
- * This function will jump to the bootloader
- */
-/*============================================================================*/
-void firmware_update_JumpTo_BL(void)
-{
-	uint32_t Jump_Address, Bl_Signature;
-	pFunction Jump_To_Bl;
-	uint8_t i;
-
-	M1_LOG_I(M1_LOGDB_TAG, "%s", "\nBL App running");
-
-	Bl_Signature = *(uint32_t *)FLASH_BL_ADDRESS;
-
-	// The first value stored in the vector table is the reset value of the stack pointer
-	if ( (*(uint32_t *)FLASH_BL_ADDRESS & 0x2FFE0000)==0x20000000 )
-	{
-		//PrintDebugMsg("\nBootloader starts...");
-		Jump_Address = *(uint32_t *)(FLASH_BL_ADDRESS + 4);
-		Jump_To_Bl = (pFunction)Jump_Address;
-
-//		HAL_Delay(100); // wait for the PrintDebugMsg() to complete
-
-		// To-Do list before jumping to the Bl
-		// - Disable all interrupts
-		// - Restore all settings
-		// - Reset SysTick
-
-		/* Disable all interrupts */
-		__disable_irq();
-		//HAL_NVIC_DisableIRQ(IRQn)
-
-		/* Disable Systick timer */
-		SysTick->CTRL = 0;
-
-		/* Set the clock to the default state */
-		HAL_RCC_DeInit();
-
-		HAL_DeInit();
-
-		/* Clear Interrupt Enable Register & Interrupt Pending Register */
-		for (i=0; i<8; i++)
-		{
-			NVIC->ICER[i] = 0xFFFFFFFF;
-			NVIC->ICPR[i] = 0xFFFFFFFF;
-		}
-
-		/* Re-enable all interrupts */
-		__enable_irq();
-/*
-		__asm volatile(
-				" mov r0, #0			\n"
-				" msr msp, r0			\n" // Reset Main Stack Pointer
-				" msr psp, r0			\n" // Reset Process Stack Pointer
-				" msr control, r0		\n" // Reset Control register
-		);
-*/
-		__set_CONTROL(0x00);
-		__set_PSP(0x0);
-		__set_MSP(*(uint32_t *)FLASH_BL_ADDRESS);
-
-		Jump_To_Bl();
-	}
-	else
-	{
-		M1_LOG_I(M1_LOGDB_TAG, "%s", "\nNo Bootloader found");
-	}
-} // void firmware_update_JumpTo_BL(void)
-
-
-
-/*============================================================================*/
-/*
- * This function will disable the watchdog timer
- */
-/*============================================================================*/
-void firmware_update_IWDG_disable(void)
-{
-	// Disable IWDG - Start
-	HAL_FLASH_Unlock(); // Unlock the FLASH control registers access
-	HAL_FLASH_OB_Unlock(); // Unlock the FLASH Option Control Registers access
-
-	// Initialize the Option Bytes structure
-	FLASH_OBProgramInitTypeDef OBInit;
-	HAL_FLASHEx_OBGetConfig(&OBInit); // Get the Option byte configuration
-
-	// Set the IWDG_SW bit
-	OBInit.OptionType = OPTIONBYTE_USER; // USER option byte configuration
-	OBInit.USERType = OB_USER_IWDG_STDBY; // Independent watchdog counter freeze in standby mode
-	OBInit.USERConfig = OB_IWDG_STDBY_FREEZE; // IWDG counter frozen in STANDBY mode
-
-	// Write the Option Bytes
-	HAL_FLASHEx_OBProgram(&OBInit); // Program option bytes
-
-	HAL_FLASH_OB_Launch(); // Launch the option bytes loading.
-
-	HAL_FLASH_OB_Lock(); // Lock the FLASH Option Control Registers access.
-	HAL_FLASH_Lock(); // Locks the FLASH control registers access
-	// Disable IWDG - End
-} // void firmware_update_IWDG_disable(void)

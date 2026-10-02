@@ -1,0 +1,12 @@
+/test_m1cp
+/test_m1cp_fs
+/test_m1cp_fw
+/test_m1cp_update_coordinator
+/test_m1cp_fwupdate
+/test_m1cp_espver
+/test_m1cp_espupdate
+/validate_file
+/m1_manager_espupdate_seam_test
+/m1_manager_fwupdate_seam_test
+fs_sandbox/
+*.o

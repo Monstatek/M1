@@ -20,6 +20,7 @@
 #include "lfrfid.h"
 //#include "m1_nfc.h"
 #include "nfc_driver.h"
+#include "m1_feedback_task.h"
 
 /*************************** D E F I N E S ************************************/
 
@@ -69,6 +70,13 @@ void m1_tasks_init(void)
 	BaseType_t ret;
 	size_t free_heap;
 
+	/* M1-FB-STD-001 v1.1 feedback manager: started first so every other
+	 * task/module created below can safely call fb_request()/fb_release()
+	 * (and the fb_net_..., fb_pwr_..., fb_alert_... orchestration wrappers)
+	 * from the moment it starts running. See
+	 * documentation/M1_FEEDBACK_RECONCILIATION.md. */
+	m1_feedback_task_init();
+
 	main_q_hdl = xQueueCreate(MAIN_QUEUE_ITEMS_MAX_N, sizeof(S_M1_Main_Q_t));
 	assert(main_q_hdl != NULL);
 
@@ -85,7 +93,7 @@ void m1_tasks_init(void)
 
 	ret = xTaskCreate(sdcard_detection_task, "sdcard_detection_task_n", M1_TASK_STACK_SIZE_DEFAULT, NULL, TASK_PRIORITY_SDCARD_HANDLER, &sdcard_task_hdl);
 	assert(ret==pdPASS);
-	assert(system_task_hdl!=NULL);
+	assert(sdcard_task_hdl!=NULL);
 	free_heap = xPortGetFreeHeapSize();
 	assert(free_heap >= M1_LOW_FREE_HEAP_WARNING_SIZE);
 
@@ -160,8 +168,13 @@ void vApplicationIdleHook(void)
 
 void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
 {
-	M1_LOG_E(M1_LOGDB_TAG, "Task %s caused stack overflow!\r\n", pcTaskName);
-	Error_Handler();
+	UNUSED(xTask);
+	UNUSED(pcTaskName);
+	taskDISABLE_INTERRUPTS();
+	for(;;)
+	{
+		__asm("nop");
+	}
 } // void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
 
 
@@ -175,7 +188,11 @@ void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
 /*============================================================================*/
 void vApplicationMallocFailedHook(void)
 {
-	M1_LOG_E(M1_LOGDB_TAG, "Heap allocation failed!\r\n");
+	taskDISABLE_INTERRUPTS();
+	for(;;)
+	{
+		__asm("nop");
+	}
 	//Error_Handler();
 	// These return the available heap space and the least amount of free heap space ever recorded
 	//xPortGetFreeHeapSize();

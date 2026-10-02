@@ -44,6 +44,11 @@ EndBSPDependencies */
 #define SDCARD_CB_READ_CPLT_MSG     1
 #define SDCARD_CB_WRITE_CPLT_MSG    2
 
+uint8_t usbmsc_sd_enable = 0;
+/* Host MSC eject event: set by SCSI START_STOP_UNIT (USB context), handled and
+ * cleared by the storage task. Only an event flag - no filesystem work here. */
+volatile uint8_t usbmsc_host_ejected = 0;
+
 extern SD_HandleTypeDef *phsd;
 extern S_M1_SDCard_Info sdcard_info;
 extern S_M1_SDCard_Hdl sdcard_ctl;
@@ -52,8 +57,9 @@ extern QueueHandle_t   sdcard_cb_q_hdl;
 int8_t STORAGE_Init(uint8_t lun);
 int8_t STORAGE_GetCapacity(uint8_t lun, uint32_t *block_num,
                            uint16_t *block_size);
-int8_t  STORAGE_IsReady(uint8_t lun);
-int8_t  STORAGE_IsWriteProtected(uint8_t lun);
+int8_t STORAGE_status_usbmsc_sd(void);
+int8_t STORAGE_IsReady(uint8_t lun);
+int8_t STORAGE_IsWriteProtected(uint8_t lun);
 int8_t STORAGE_Read(uint8_t lun, uint8_t *buf, uint32_t blk_addr,
                     uint16_t blk_len);
 int8_t STORAGE_Write(uint8_t lun, uint8_t *buf, uint32_t blk_addr,
@@ -116,8 +122,7 @@ int8_t STORAGE_GetCapacity(uint8_t lun, uint32_t *block_num, uint16_t *block_siz
   HAL_SD_CardInfoTypeDef cardinfo;
   int8_t res = -1;
 
-  if ((sdcard_ctl.status == SD_access_UnMounted) &&
-      (m1_sd_detected()))
+  if (STORAGE_status_usbmsc_sd())
   {
     HAL_SD_GetCardInfo(phsd, &cardinfo);
 
@@ -129,6 +134,15 @@ int8_t STORAGE_GetCapacity(uint8_t lun, uint32_t *block_num, uint16_t *block_siz
   return (res);
 }
 
+int8_t STORAGE_status_usbmsc_sd(void)
+{
+    if ((sdcard_ctl.status == SD_access_UnMounted) &&
+        m1_sd_detected() &&
+        usbmsc_sd_enable)
+        return true;
+    else
+        return false;
+}
 
 /**
   * @brief  Checks whether the medium is ready.
@@ -141,8 +155,7 @@ int8_t  STORAGE_IsReady(uint8_t lun)
 
   UNUSED(lun);
 
-  if ((sdcard_ctl.status == SD_access_UnMounted) &&
-      (m1_sd_detected()))
+  if (STORAGE_status_usbmsc_sd())
   {
     m1_USB_MSC_ready = 0;
   }
@@ -164,7 +177,6 @@ int8_t  STORAGE_IsWriteProtected(uint8_t lun)
   UNUSED(lun);
   return  0;
 }
-
 
 uint32_t DBG_sd_rd_timeout_cnt = 0;
 uint32_t DBG_sd_wr_timeout_cnt = 0;
@@ -191,8 +203,7 @@ int8_t STORAGE_Read(uint8_t lun, uint8_t *buf,
 
   DBG_sd_buf = buf;
 
-  if ((sdcard_ctl.status == SD_access_UnMounted) &&
-      (m1_sd_detected()))
+  if (STORAGE_status_usbmsc_sd())
   {
     if (HAL_SD_ReadBlocks_DMA(phsd, buf, (uint32_t)blk_addr, blk_len)==HAL_OK)
     {
@@ -248,8 +259,7 @@ int8_t STORAGE_Write(uint8_t lun, uint8_t *buf,
 
   UNUSED(lun);
 
-  if ((sdcard_ctl.status == SD_access_UnMounted) &&
-      (m1_sd_detected()))
+  if (STORAGE_status_usbmsc_sd())
   {
     if ( HAL_SD_WriteBlocks_DMA(phsd, buf, (uint32_t)blk_addr, blk_len)==HAL_OK )
     {

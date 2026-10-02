@@ -31,6 +31,7 @@
 #include "m1_wifi.h"
 #include "m1_bt.h"
 #include "m1_ir_remotes.h"
+#include "m1_capture_link.h"
 
 /*************************** D E F I N E S ************************************/
 
@@ -39,6 +40,11 @@
 /************************** S T R U C T U R E S *******************************/
 
 /*----------------------------- > Sub-GHz ------------------------------------*/
+
+S_M1_Menu_t menu_Sub_GHz_Scan =
+{
+    "Scan", sub_ghz_scan, NULL, NULL, 0, 0, NULL, NULL, NULL
+};
 
 S_M1_Menu_t menu_Sub_GHz_Record =
 {
@@ -55,20 +61,15 @@ S_M1_Menu_t menu_Sub_GHz_Frequency_Reader =
     "Frequency Reader", sub_ghz_frequency_reader, NULL, NULL, 0, 0, NULL, NULL, NULL
 };
 
-S_M1_Menu_t menu_Sub_GHz_Regional_Information =
+S_M1_Menu_t menu_Sub_GHz_GPIO_Remap =
 {
-    "Regional Information", sub_ghz_regional_information, NULL, NULL, 0, 0, NULL, NULL, NULL
-};
-
-S_M1_Menu_t menu_Sub_GHz_Radio_Settings =
-{
-    "Radio Settings", sub_ghz_radio_settings, NULL, NULL, 0, 0, NULL, NULL, NULL
+    "Remap Tx pin", sub_ghz_gpio_remap, NULL, NULL, 0, 0, NULL, NULL, NULL
 };
 
 S_M1_Menu_t menu_Sub_GHz =
 {
-    "Sub-GHz", NULL, NULL, NULL, 4, 0, menu_m1_icon_wave, NULL,
-    {&menu_Sub_GHz_Record, &menu_Sub_GHz_Replay, &menu_Sub_GHz_Frequency_Reader, &menu_Sub_GHz_Regional_Information}
+    "Sub-GHz", NULL, NULL, NULL, 5, 0, menu_m1_icon_wave, NULL,
+    {&menu_Sub_GHz_Scan, &menu_Sub_GHz_Record, &menu_Sub_GHz_Replay, &menu_Sub_GHz_Frequency_Reader, &menu_Sub_GHz_GPIO_Remap}
 };
 
 /*----------------------------- > 125KHz RFID --------------------------------*/
@@ -112,15 +113,66 @@ S_M1_Menu_t menu_NFC_Saved =
     "Saved", nfc_saved, NULL, NULL, 0, 0, NULL, NULL, NULL
 };
 
-S_M1_Menu_t menu_NFC_Tools =
+S_M1_Menu_t menu_NFC_Detect_Reader =
 {
-    "Tools", nfc_tools, NULL, NULL, 0, 0, NULL, NULL, NULL
+    "Extract Keys", nfc_detect_reader, NULL, NULL, 0, 0, NULL, NULL, NULL
 };
 
+S_M1_Menu_t menu_NFC_MFC_Keys =
+{
+    "MIFARE Classic Keys", nfc_mfc_keys, NULL, NULL, 0, 0, NULL, NULL, NULL
+};
+
+S_M1_Menu_t menu_NFC_ULC_Keys =
+{
+    /* Hardware finding: "MIFARE Ultralight Keys" ran off the 128x64
+     * display in the NFC Tools list. Label shortened to fit; the
+     * internal struct name, launcher function, view mode, dictionary
+     * paths and formats are all unchanged. */
+    "Ultralight Keys", nfc_ulc_keys, NULL, NULL, 0, 0, NULL, NULL, NULL
+};
+
+S_M1_Menu_t menu_NFC_PWD_Keys =
+{
+    "NTAG/UL Passwords", nfc_pwd_keys, NULL, NULL, 0, 0, NULL, NULL, NULL
+};
+
+/* "MFC Emulate" (nfc_mfc_emulate(), m1_nfc.c) is intentionally not listed
+ * here: it always presents the fixed 01020304 test identity regardless of
+ * any loaded card (see m1_mfc_raw_begin()'s unarmed fallback), which
+ * duplicates and is weaker than the real saved-card path (Read/Saved ->
+ * More -> Emulate). The function itself, its view, and its dev-only
+ * dispatch event are left entirely intact for bench testing -- only the
+ * production Tools menu entry point to it is removed. */
+
+S_M1_Menu_t menu_NFC_Tools =
+{
+    "Tools", NULL, NULL, NULL, 3, 0, NULL, NULL, {&menu_NFC_MFC_Keys, &menu_NFC_ULC_Keys, &menu_NFC_PWD_Keys}
+};
+
+/* NFC > Add: manual card creation for the six approved types. */
+S_M1_Menu_t menu_NFC_Add_MFC1K   = { "MFC 1K",     nfc_add_mfc1k,      NULL, NULL, 0, 0, NULL, NULL, NULL };
+S_M1_Menu_t menu_NFC_Add_MFC4K   = { "MFC 4K",     nfc_add_mfc4k,      NULL, NULL, 0, 0, NULL, NULL, NULL };
+S_M1_Menu_t menu_NFC_Add_UL      = { "Ultralight", nfc_add_ultralight, NULL, NULL, 0, 0, NULL, NULL, NULL };
+S_M1_Menu_t menu_NFC_Add_NTAG213 = { "NTAG213",    nfc_add_ntag213,    NULL, NULL, 0, 0, NULL, NULL, NULL };
+S_M1_Menu_t menu_NFC_Add_NTAG215 = { "NTAG215",    nfc_add_ntag215,    NULL, NULL, 0, 0, NULL, NULL, NULL };
+S_M1_Menu_t menu_NFC_Add_NTAG216 = { "NTAG216",    nfc_add_ntag216,    NULL, NULL, 0, 0, NULL, NULL, NULL };
+
+S_M1_Menu_t menu_NFC_Add =
+{
+    "Add", NULL, NULL, NULL, 6, 0, NULL, NULL,
+    {&menu_NFC_Add_MFC1K, &menu_NFC_Add_MFC4K, &menu_NFC_Add_UL,
+     &menu_NFC_Add_NTAG213, &menu_NFC_Add_NTAG215, &menu_NFC_Add_NTAG216}
+};
+
+/* Release build: Extract Keys is not exposed in the user-facing NFC menu.
+ * menu_NFC_Detect_Reader and nfc_detect_reader stay in the tree as internal
+ * implementation; only the menu entry and the item count are withdrawn, so no
+ * surrounding NFC entry changes position or meaning. */
 S_M1_Menu_t menu_NFC =
 {
-    "NFC", &menu_nfc_init, menu_nfc_deinit, NULL, 3, 0, menu_m1_icon_nfc, NULL,
-    {&menu_NFC_Read, &menu_NFC_Saved, &menu_NFC_Tools }
+    "NFC", &menu_nfc_init, menu_nfc_deinit, NULL, 4, 0, menu_m1_icon_nfc, NULL,
+    {&menu_NFC_Read, &menu_NFC_Saved, &menu_NFC_Add, &menu_NFC_Tools }
 };
 
 /*----------------------------- > Infrared -----------------------------------*/
@@ -161,10 +213,15 @@ S_M1_Menu_t menu_Infrared_Saved_Remotes =
     "Replay", infrared_saved_remotes, NULL, NULL, 0, 0, NULL, NULL, NULL
 };
 
+S_M1_Menu_t menu_Infrared_Remap_GPIO =
+{
+    "Remap Tx pin", infrared_remap_gpio, NULL, NULL, 0, 0, NULL, NULL, NULL
+};
+
 S_M1_Menu_t menu_Infrared =
 {
-    "Infrared", menu_infrared_init, NULL, NULL, 3, 0, menu_m1_icon_infrared, NULL,
-    {&menu_Infrared_Universal_Remotes, &menu_Infrared_Learn_New_Remote, &menu_Infrared_Saved_Remotes}
+    "Infrared", menu_infrared_init, NULL, NULL, 4, 0, menu_m1_icon_infrared, NULL,
+    {&menu_Infrared_Universal_Remotes, &menu_Infrared_Learn_New_Remote, &menu_Infrared_Saved_Remotes, &menu_Infrared_Remap_GPIO}
 };
 
 /*------------------------------- > GPIO -------------------------------------*/
@@ -204,19 +261,21 @@ S_M1_Menu_t menu_Setting_Storage_About =
     "About SD Card", storage_about, NULL, NULL, 0, 0, NULL, NULL, NULL
 };
 
-S_M1_Menu_t menu_Setting_Storage_Explore =
+/* No Explore/Mount/Unmount items here: boot/home LEFT is the sole surviving
+ * path to storage_explore(); Mount and Unmount had no caller anywhere else
+ * in the tree, so storage_mount()/storage_unmount() were removed entirely. */
+
+/* USB Drive = the USB Mass Storage (MSC) SD-card exposure, re-homed from
+ * Settings > Storage into the new top-level USB category. storage_usbmsc is the
+ * MSC lifecycle handler (safe SD ownership handoff); user-facing name = "USB Drive". */
+S_M1_Menu_t menu_USB_Drive =
 {
-    "Explore SD Card", storage_explore, NULL, NULL, 0, 0, NULL, NULL, NULL
+    "USB Drive", storage_usbmsc, NULL, NULL, 0, 0, NULL, NULL, NULL
 };
 
-S_M1_Menu_t menu_Setting_Storage_Mount =
+S_M1_Menu_t menu_USB =
 {
-    "Mount SD Card", storage_mount, NULL, NULL, 0, 0, NULL, NULL, NULL
-};
-
-S_M1_Menu_t menu_Setting_Storage_Unmount =
-{
-    "Unmount SD Card", storage_unmount, NULL, NULL, 0, 0, NULL, NULL, NULL
+    "USB", NULL, NULL, NULL, 1, 0, menu_m1_icon_usb, NULL, {&menu_USB_Drive}
 };
 
 S_M1_Menu_t menu_Setting_Storage_Format =
@@ -281,24 +340,14 @@ S_M1_Menu_t menu_Setting_ESP32_Firmware_Update =
 
 /*---------------------- > Settings-ESP32 Update-End ----------------------*/
 
-S_M1_Menu_t menu_Settings_LCD_and_Notifications =
-{
-    "LCD and Notifications", settings_lcd_and_notifications, NULL, NULL, 0, 0, NULL, NULL, NULL
-};
-
 S_M1_Menu_t menu_Settings_Storage =
 {
-    "Storage", menu_setting_storage_init, NULL, NULL, 5, 0, NULL, NULL, {&menu_Setting_Storage_About, &menu_Setting_Storage_Explore, &menu_Setting_Storage_Mount, &menu_Setting_Storage_Unmount, &menu_Setting_Storage_Format}
+    "Storage", menu_setting_storage_init, NULL, NULL, 2, 0, NULL, NULL, {&menu_Setting_Storage_About, &menu_Setting_Storage_Format}
 };
 
 S_M1_Menu_t menu_Settings_Power =
 {
     "Power", menu_setting_power_init, NULL, NULL, 3, 0, NULL, NULL, {&menu_Setting_Power_Info, &menu_Setting_Power_Reboot, &menu_Setting_Power_Off}
-};
-
-S_M1_Menu_t menu_Settings_System =
-{
-    "System", settings_system, NULL, NULL, 0, 0, NULL, NULL, NULL
 };
 
 S_M1_Menu_t menu_Setting_Firmware_Update =
@@ -319,46 +368,97 @@ S_M1_Menu_t menu_Settings_About =
 S_M1_Menu_t menu_Settings =
 {
     "Settings", menu_settings_init, NULL, NULL, 5, 0, menu_m1_icon_setting, NULL,
-    /*{&menu_Settings_LCD_and_Notifications,*/ {&menu_Settings_Storage, &menu_Settings_Power,/* &menu_Settings_System,*/ &menu_Setting_Firmware_Update, &menu_Setting_ESP32, &menu_Settings_About}
+    {&menu_Settings_Storage, &menu_Settings_Power, &menu_Setting_Firmware_Update, &menu_Setting_ESP32, &menu_Settings_About}
 };
 
 /*--------------------------------- > Wifi -----------------------------------*/
 
-S_M1_Menu_t menu_Wifi_Scan_AP =
+/* Networks is a leaf (like Deauth/Handshake/Beacon/Survey) so its BACK uses the
+ * same proven parent-menu return path (-> Wi-Fi menu). Saved Networks is reached
+ * from the in-function Network Actions menu, not a nested menu-system submenu. */
+S_M1_Menu_t menu_Wifi_Networks =
 {
-    "Scan AP", wifi_scan_ap, NULL, NULL, 0, 0, NULL, NULL, NULL
+    "Networks", wifi_scan_networks, NULL, NULL, 0, 0, NULL, NULL, NULL
 };
 
+S_M1_Menu_t menu_Wifi_Deauth =
+{
+    "Deauth Client", wifi_deauth_client, NULL, NULL, 0, 0, NULL, NULL, NULL
+};
+
+S_M1_Menu_t menu_Wifi_Handshake =
+{
+    "Handshake", wifi_handshake_flow, NULL, NULL, 0, 0, NULL, NULL, NULL
+};
+
+S_M1_Menu_t menu_Wifi_Beacon =
+{
+    "Beacon", wifi_beacon, NULL, NULL, 0, 0, NULL, NULL, NULL
+};
+
+S_M1_Menu_t menu_Wifi_Survey =
+{
+    "Channel Survey", wifi_survey, NULL, NULL, 0, 0, NULL, NULL, NULL
+};
+
+/* MonstaShark stays under Wi-Fi so it shares the AP scan session with the
+ * other Wi-Fi tools; navigation between them does not cross menu_wifi_exit. */
+S_M1_Menu_t menu_Capture_Network =
+{
+    "MonstaShark", m1_capture_network_screen, NULL, NULL, 0, 0, menu_m1_icon_wifi, NULL, NULL
+};
+
+/* gui_menu_update = NULL uses the standard scrolling submenu renderer
+ * (m1_gui_submenu_update). MonstaShark is third in the Wi-Fi menu. */
 S_M1_Menu_t menu_Wifi =
 {
-    "Wifi", menu_wifi_init, NULL, NULL, 1, 0, menu_m1_icon_wifi, NULL,
-    {&menu_Wifi_Scan_AP}
+    "Wi-Fi", menu_wifi_init, menu_wifi_exit, NULL, 6, 0, menu_m1_icon_wifi, NULL,
+    {&menu_Wifi_Networks, &menu_Wifi_Deauth, &menu_Capture_Network, &menu_Wifi_Handshake,
+     &menu_Wifi_Beacon, &menu_Wifi_Survey}
 };
 
-/*--------------------------------- > Wifi -----------------------------------*/
-
-S_M1_Menu_t menu_Bluetooth_Scan =
+/*------------------------------ > Bluetooth ---------------------------------*/
+S_M1_Menu_t menu_Bluetooth_ScanDevices =
 {
-    "Scan", bluetooth_scan, NULL, NULL, 0, 0, NULL, NULL, NULL
+    "Scan Devices", bluetooth_scan_devices, NULL, NULL, 0, 0, NULL, NULL, NULL
 };
 
-S_M1_Menu_t menu_Bluetooth_Advertise =
+/* Device Details is not a top-level function: it is the inspector reached by pressing
+ * CENTER on a scanned device inside Scan Devices (bt_detail_view). */
+
+S_M1_Menu_t menu_Bluetooth_SignalMeter =
 {
-    "Advertise", bluetooth_advertise, NULL, NULL, 0, 0, NULL, NULL, NULL
+    "Signal Meter", bluetooth_signal_meter, NULL, NULL, 0, 0, NULL, NULL, NULL
 };
+
+S_M1_Menu_t menu_Bluetooth_GattExplorer =
+{
+    "GATT Explorer", bluetooth_gatt_explorer, NULL, NULL, 0, 0, NULL, NULL, NULL
+};
+
+S_M1_Menu_t menu_Bluetooth_Saved =
+{
+    "Saved", bluetooth_saved, NULL, NULL, 0, 0, NULL, NULL, NULL
+};
+
 
 S_M1_Menu_t menu_Bluetooth =
 {
-    "Bluetooth", menu_bluetooth_init, NULL, NULL, 2, 0, menu_m1_icon_bluetooth, NULL,
-    {&menu_Bluetooth_Scan, &menu_Bluetooth_Advertise}
+    "Bluetooth", menu_bluetooth_init, menu_bluetooth_exit, NULL, 4, 0, menu_m1_icon_bluetooth, NULL,
+    {&menu_Bluetooth_ScanDevices, &menu_Bluetooth_SignalMeter, &menu_Bluetooth_GattExplorer, &menu_Bluetooth_Saved}
 };
+
+/* NOTE: MonstaShark capture moved INTO the Wi-Fi menu (menu_Capture_Network /
+ * menu_Capture_Test are now children of menu_Wifi above) so it shares the AP
+ * scan session with the other Wi-Fi tools. The former top-level "Capture" menu
+ * and its main-menu slot were removed. */
 
 /*------------------------------- > MAIN MENU --------------------------------*/
 
 const S_M1_Menu_t menu_Main =
 {
-    "Main Menu", NULL, NULL, NULL, 8, 0, NULL, NULL,
-    {&menu_Sub_GHz, &menu_125KHz_RFID, &menu_NFC, &menu_Infrared, &menu_GPIO, &menu_Wifi, &menu_Bluetooth, &menu_Settings}
+    "Main Menu", NULL, NULL, NULL, 9, 0, NULL, NULL,
+    {&menu_Sub_GHz, &menu_125KHz_RFID, &menu_NFC, &menu_Infrared, &menu_USB, &menu_GPIO, &menu_Wifi, &menu_Bluetooth, &menu_Settings}
 };
 
 
@@ -374,6 +474,7 @@ TaskHandle_t					menu_main_handler_task_hdl;
 static void menu_main_init(void);
 void menu_main_handler_task(void *param);
 void subfunc_handler_task(void *param);
+static void m1_quick_power_down(void);
 
 /*************** F U N C T I O N   I M P L E M E N T A T I O N ****************/
 
@@ -574,7 +675,21 @@ void menu_main_handler_task(void *param)
 						}
 						else if ( m1_device_stat.op_mode==M1_OPERATION_MODE_DISPLAY_ON )
 						{
-							storage_explore();
+							/* HOME-LEFT opens the general SD-card browser. Route it through the
+							 * generic sub-function dispatch (op_mode/sub_func/xTaskNotify) so
+							 * storage_explore() runs on subfunc_handler_task (4096-byte stack)
+							 * instead of inline on this menu_main_handler_task (1024-byte
+							 * stack). Opening a recognized saved file enters the deep native view
+							 * handler (nfc_saved/rfid_125khz_saved/sub_ghz_replay); on the small
+							 * stack that overflowed and rebooted the device. This is now the
+							 * sole entry point into storage_explore() -- the Settings > Storage
+							 * "Explore SD Card" menu item that used to be the other one was
+							 * removed as a confirmed duplicate. */
+							m1_device_stat.op_mode  = M1_OPERATION_MODE_SUB_FUNC_RUNNING;
+							m1_device_stat.sub_func = storage_explore;
+							xTaskNotify(subfunc_handler_task_hdl, 0, eNoAction);
+							xTaskNotifyWait(0, 0, NULL, portMAX_DELAY);
+							m1_device_stat.op_mode  = M1_OPERATION_MODE_DISPLAY_ON;
 							m1_gui_welcome_scr();
 						}
 	    				break;
@@ -626,9 +741,12 @@ void menu_main_handler_task(void *param)
 								menu_update_stat = MENU_UPDATE_RESTORE;
 							} // else
 						} // if ( m1_device_stat.op_mode==M1_OPERATION_MODE_MENU_ON )
-						else
+						else if ( m1_device_stat.op_mode==M1_OPERATION_MODE_DISPLAY_ON)
 						{
-							; // Do something here if necessary. This case may never happen!
+							if ( this_button_status.event[BUTTON_BACK_KP_ID]==BUTTON_EVENT_LCLICK )
+							{
+								m1_quick_power_down();
+							}
 						}
 	    				break;
 
@@ -644,6 +762,58 @@ void menu_main_handler_task(void *param)
 	} // while(1)
 
 } // void menu_main_handler_task(void *param)
+
+
+
+/*============================================================================*/
+/*
+ * This function handles the quick power-down option from the welcome screen
+*/
+/*============================================================================*/
+static void m1_quick_power_down(void)
+{
+	S_M1_Main_Q_t q_item;
+	S_M1_Buttons_Status this_button_status;
+	BaseType_t ret;
+
+	power_shutdown_gui_update(0);
+	// Let wait here until user releases the BACK button.
+	while ( true )
+	{
+		vTaskDelay(100); // Return some time to the system
+		if ( m1_button_event_check(BUTTON_BACK_KP_ID, BUTTON_EVENT_IDLE) ) // Button released?
+			break;
+	} // while ( true )
+	xQueueReceive(button_events_q_hdl, &this_button_status, 0); // Remove old events, if any, from the keypad queue
+	xQueueReset(main_q_hdl); // Reset old events from main queue, if any
+
+	while (1)
+	{
+		ret = xQueueReceive(main_q_hdl, &q_item, portMAX_DELAY);
+		if (ret==pdTRUE)
+		{
+			if ( q_item.q_evt_type==Q_EVENT_KEYPAD )
+			{
+				ret = xQueueReceive(button_events_q_hdl, &this_button_status, 0);
+				if ( ret!=pdTRUE ) // This should never happen!
+					continue; // Wait for a new notification when the attempt to read the button event fails
+				if ( (this_button_status.event[BUTTON_BACK_KP_ID]==BUTTON_EVENT_CLICK) ||
+					 (this_button_status.event[BUTTON_LEFT_KP_ID]==BUTTON_EVENT_CLICK) ) // user wants to exit?
+				{
+					; // Do extra tasks here if needed
+					xQueueReset(main_q_hdl); // Reset main q before return
+					m1_gui_welcome_scr();
+					break;
+				} // if ( m1_buttons_status[BUTTON_BACK_KP_ID]==BUTTON_EVENT_CLICK )
+				else if ( this_button_status.event[BUTTON_RIGHT_KP_ID]==BUTTON_EVENT_CLICK ) // Power off?
+				{
+					m1_power_down();
+				} // else if ( this_button_status.event[BUTTON_RIGHT_KP_ID]==BUTTON_EVENT_CLICK )
+			} // if ( q_item.q_evt_type==Q_EVENT_KEYPAD )
+		} // if (ret==pdTRUE)
+	} // while (1)
+
+} // static void m1_quick_power_down(void)
 
 
 

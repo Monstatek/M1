@@ -157,9 +157,11 @@ typedef enum _CtrlMsgId {
   CTRL_MSG_ID__Req_GetFwVersion = 123,
   CTRL_MSG_ID__Req_SetCountryCode = 124,
   CTRL_MSG_ID__Req_GetCountryCode = 125,
+  /* Added by B.N @ Monstatek 2025 */
   CTRL_MSG_ID__Req_BLEScanList = 126,
   CTRL_MSG_ID__Req_BLEAdvertise = 127,
   CTRL_MSG_ID__Req_BLEReset = 128,
+  /* End - Added by B.N @ Monstatek 2025 */
   /*
    * Add new control path command response before Req_Max
    * and update Req_Max
@@ -194,9 +196,11 @@ typedef enum _CtrlMsgId {
   CTRL_MSG_ID__Resp_GetFwVersion = 223,
   CTRL_MSG_ID__Resp_SetCountryCode = 224,
   CTRL_MSG_ID__Resp_GetCountryCode = 225,
+  /* Added by B.N @ Monstatek 2025 */
   CTRL_MSG_ID__Resp_BLEScanList = 226,
   CTRL_MSG_ID__Resp_BLEAdvertise = 227,
   CTRL_MSG_ID__Resp_BLEReset = 228,
+  /* End - Added by B.N @ Monstatek 2025 */
   /*
    * Add new control path command response before Resp_Max
    * and update Resp_Max
@@ -280,9 +284,11 @@ typedef enum {
 	CTRL_REQ_SET_COUNTRY_CODE          = CTRL_MSG_ID__Req_SetCountryCode,     //0x7c
 	CTRL_REQ_GET_COUNTRY_CODE          = CTRL_MSG_ID__Req_GetCountryCode,     //0x7d
 
+	/* Added by B.N @ Monstatek 2025 */
 	CTRL_REQ_GET_BLE_SCAN_LIST		   = CTRL_MSG_ID__Req_BLEScanList,		//0x7e
 	CTRL_REQ_SET_BLE_ADVERTISE		   = CTRL_MSG_ID__Req_BLEAdvertise,		//0x7f
 	CTRL_REQ_SET_BLE_RESET		   	   = CTRL_MSG_ID__Req_BLEReset,			//0x80
+	/* End - Added by B.N @ Monstatek 2025 */
 	/*
 	 * Add new control path command response before Req_Max
 	 * and update Req_Max
@@ -326,9 +332,11 @@ typedef enum {
 	CTRL_RESP_SET_COUNTRY_CODE          = CTRL_MSG_ID__Resp_SetCountryCode,     //0x7c -> 0xe0
 	CTRL_RESP_GET_COUNTRY_CODE          = CTRL_MSG_ID__Resp_GetCountryCode,     //0x7d -> 0xe1
 
+	/* Added by B.N @ Monstatek 2025 */
 	CTRL_RESP_GET_BLE_SCAN_LIST        	= CTRL_MSG_ID__Resp_BLEScanList,		//0x7e -> 0xe2
 	CTRL_RESP_SET_BLE_ADVERTISE        	= CTRL_MSG_ID__Resp_BLEAdvertise,		//0x7f -> 0xe3
 	CTRL_RESP_SET_BLE_RESET        		= CTRL_MSG_ID__Resp_BLEReset,			//0x80 -> 0xe4
+	/* End - Added by B.N @ Monstatek 2025 */
 	/*
 	 * Add new control path comm       and response before Resp_Max
 	 * and update Resp_Max

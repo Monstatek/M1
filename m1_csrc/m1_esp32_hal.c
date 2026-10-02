@@ -32,7 +32,7 @@
 #define ESP32_HANDSHAKE_EXTI_IRQn   EXTI7_IRQn
 
 #define ESP32_DMA_RX_BUFFER_LEN 	128
-#define ESP32_RX_BUFFER_LEN			192
+#define ESP32_RX_BUFFER_LEN			4096
 
 #define M1_LOGDB_TAG				"ESP32"
 
@@ -67,6 +67,8 @@ EXTI_HandleTypeDef esp32_exti_dataready;
 static uint8_t esp32_init_done = FALSE;
 static uint8_t esp32_uart_init_done = FALSE;
 SemaphoreHandle_t sem_esp32_trans;
+static volatile uint32_t esp32_uart_rx_drop_cnt = 0;
+static volatile uint32_t esp32_uart_ore_cnt = 0;
 
 S_M1_RingBuffer esp32_rb_hdl = {0};
 static uint8_t *pesp32_rx = NULL;
@@ -206,63 +208,80 @@ void m1_esp32_reset_buffer(void)
 /******************************************************************************/
 void esp32_UART_init(void)
 {
-	if ( esp32_uart_init_done )
-		return;
+    if ( esp32_uart_init_done )
+        return;
 
-	GPIO_InitTypeDef GPIO_InitStruct = {0};
-	RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
+    /* Publish valid storage before either UART or DMA interrupts can run. */
+    HAL_NVIC_DisableIRQ(ESP32_UART_IRQn);
+    HAL_NVIC_DisableIRQ(ESP32_UART_DMA_Tx_IRQn);
+    if (!pesp32_rx)
+        pesp32_rx = malloc(ESP32_RX_BUFFER_LEN);
+    if (!sem_esp32_trans)
+        sem_esp32_trans = xSemaphoreCreateBinary();
+    if (!pesp32_rx || !sem_esp32_trans)
+    {
+        Error_Handler();
+        return;
+    }
+    m1_ringbuffer_init(&esp32_rb_hdl, pesp32_rx, ESP32_RX_BUFFER_LEN, sizeof(uint8_t));
+    (void)xSemaphoreGive(sem_esp32_trans);
 
-	// Initializes the peripherals clock
-	PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_UART4;
-	PeriphClkInit.Uart4ClockSelection = RCC_UART4CLKSOURCE_PCLK1;
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+    RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
+
+    // Initializes the peripherals clock
+    PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_UART4;
+    PeriphClkInit.Uart4ClockSelection = RCC_UART4CLKSOURCE_PCLK1;
     if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
     {
-    	Error_Handler();
+        Error_Handler();
     }
 
-	/* Enable Peripheral clock */
-	__HAL_RCC_UART4_CLK_ENABLE();
+    /* Enable Peripheral clock */
+    __HAL_RCC_UART4_CLK_ENABLE();
 
-	//__HAL_RCC_GPIOA_CLK_ENABLE();
-	/* UART4 GPIO Configuration
-	PA0    ------> UART4_TX (alias ESP32_RX)
-	PA1    ------> UART4_RX (alias ESP32_TX)
-	*/
-	GPIO_InitStruct.Pin = ESP32_TX_Pin|ESP32_RX_Pin;
-	GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-	GPIO_InitStruct.Pull = GPIO_NOPULL;
-	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-	GPIO_InitStruct.Alternate = GPIO_AF8_UART4;
-	HAL_GPIO_Init( ESP32_TX_GPIO_Port, &GPIO_InitStruct);
+    //__HAL_RCC_GPIOA_CLK_ENABLE();
+    /* UART4 GPIO Configuration
+    PA0    ------> UART4_TX (alias ESP32_RX)
+    PA1    ------> UART4_RX (alias ESP32_TX)
+    */
+    GPIO_InitStruct.Pin = ESP32_TX_Pin|ESP32_RX_Pin;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    GPIO_InitStruct.Alternate = GPIO_AF8_UART4;
+    HAL_GPIO_Init( ESP32_TX_GPIO_Port, &GPIO_InitStruct);
 
-	huart_esp.Instance = UART4;
-	huart_esp.Init.BaudRate = ESP32_UART_BAUDRATE;
-	huart_esp.Init.WordLength = UART_WORDLENGTH_8B;
-	huart_esp.Init.StopBits = UART_STOPBITS_1;
-	huart_esp.Init.Parity = UART_PARITY_NONE;
-	huart_esp.Init.Mode = UART_MODE_TX_RX;
-	huart_esp.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-	huart_esp.Init.OverSampling = UART_OVERSAMPLING_16;
-	huart_esp.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
-	huart_esp.Init.ClockPrescaler = UART_PRESCALER_DIV1;
-	huart_esp.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
-	if (HAL_UART_Init(&huart_esp) != HAL_OK)
-	{
-		Error_Handler();
-	}
-	if (HAL_UARTEx_SetTxFifoThreshold(&huart_esp, UART_TXFIFO_THRESHOLD_1_8) != HAL_OK)
-	{
-		Error_Handler();
-	}
-	if (HAL_UARTEx_SetRxFifoThreshold(&huart_esp, UART_RXFIFO_THRESHOLD_1_8) != HAL_OK)
-	{
-		Error_Handler();
-	}
-	if (HAL_UARTEx_DisableFifoMode(&huart_esp) != HAL_OK)
-	{
-		Error_Handler();
-	}
+    huart_esp.Instance = UART4;
+    huart_esp.Init.BaudRate = ESP32_UART_BAUDRATE;
+    huart_esp.Init.WordLength = UART_WORDLENGTH_8B;
+    huart_esp.Init.StopBits = UART_STOPBITS_1;
+    huart_esp.Init.Parity = UART_PARITY_NONE;
+    huart_esp.Init.Mode = UART_MODE_TX_RX;
+    huart_esp.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+    huart_esp.Init.OverSampling = UART_OVERSAMPLING_16;
+    huart_esp.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+    huart_esp.Init.ClockPrescaler = UART_PRESCALER_DIV1;
+    huart_esp.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
+    if (HAL_UART_Init(&huart_esp) != HAL_OK)
+    {
+        Error_Handler();
+    }
+    if (HAL_UARTEx_SetTxFifoThreshold(&huart_esp, UART_TXFIFO_THRESHOLD_1_8) != HAL_OK)
+    {
+        Error_Handler();
+    }
+    if (HAL_UARTEx_SetRxFifoThreshold(&huart_esp, UART_RXFIFO_THRESHOLD_1_8) != HAL_OK)
+    {
+        Error_Handler();
+    }
+    if (HAL_UARTEx_DisableFifoMode(&huart_esp) != HAL_OK)
+    {
+        Error_Handler();
+    }
 
+	esp32_UART_DMA_init();
+	esp32_uart_init_done = TRUE;
 	__HAL_UART_ENABLE_IT(&huart_esp, UART_IT_RXFNE);
 	__HAL_UART_ENABLE_IT(&huart_esp, UART_IT_ORE);
 	__HAL_UART_ENABLE_IT(&huart_esp, UART_IT_ERR);
@@ -270,19 +289,6 @@ void esp32_UART_init(void)
 	/* Enable the UART global Interrupt */
 	HAL_NVIC_SetPriority(ESP32_UART_IRQn, configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY, 0);
 	HAL_NVIC_EnableIRQ(ESP32_UART_IRQn);
-
-	esp32_UART_DMA_init();
-
-	if ( !pesp32_rx )
-		pesp32_rx = malloc(ESP32_RX_BUFFER_LEN);
-	assert(pesp32_rx!=NULL);
-	m1_ringbuffer_init(&esp32_rb_hdl, pesp32_rx, ESP32_RX_BUFFER_LEN, sizeof(uint8_t));
-
-	sem_esp32_trans = xSemaphoreCreateBinary();
-	assert(sem_esp32_trans!=NULL);
-	xSemaphoreGive(sem_esp32_trans); // Must give first
-
-	esp32_uart_init_done = TRUE;
 
 	//HAL_UART_Receive_IT(&huart_esp, esp_rx_buffer, 1);
 } // void esp32_UART_init(void)
@@ -339,6 +345,7 @@ static void esp32_UART_DMA_init(void)
 	//Activate DMA interrupts: Transfer complete
     hgpdma1_channel5_tx.Instance->CCR = DMA_CCR_TCIE;
 
+
 	/* GPDMA interrupts enable */
 	HAL_NVIC_SetPriority(ESP32_UART_DMA_Tx_IRQn, configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY, 0);
     HAL_NVIC_EnableIRQ(ESP32_UART_DMA_Tx_IRQn);
@@ -387,7 +394,7 @@ void m1_esp32_uart_tx(char *txdata)
 
 	/* Start DMA transfer */
 	__HAL_DMA_ENABLE(&hgpdma1_channel5_tx);
-} // void m1_logdb_start_dma_tx(char *txdata)
+} // void m1_esp32_uart_tx(char *txdata)
 
 
 
@@ -399,9 +406,67 @@ void m1_esp32_uart_tx(char *txdata)
 /*============================================================================*/
 void esp32_uartrx_handler(uint8_t rx_byte)
 {
-	m1_ringbuffer_write(&esp32_rb_hdl, &rx_byte, 1);
+	if (m1_ringbuffer_write(&esp32_rb_hdl, &rx_byte, 1) == 0)
+	{
+		esp32_uart_rx_drop_cnt++;
+	}
 } // void esp32_uartrx_handler(uint8_t rx_byte)
 
+
+
+/******************************************************************************/
+/**
+* @brief Notify UART overrun event from ISR
+* @param None
+* @retval None
+*/
+/******************************************************************************/
+void m1_esp32_uart_notify_ore(void)
+{
+	esp32_uart_ore_cnt++;
+}
+
+
+
+/******************************************************************************/
+/**
+* @brief Get and clear dropped RX byte count
+* @param None
+* @retval Count value
+*/
+/******************************************************************************/
+uint32_t m1_esp32_get_and_clear_rx_drop_count(void)
+{
+	uint32_t cnt;
+
+	taskENTER_CRITICAL();
+	cnt = esp32_uart_rx_drop_cnt;
+	esp32_uart_rx_drop_cnt = 0;
+	taskEXIT_CRITICAL();
+
+	return cnt;
+}
+
+
+
+/******************************************************************************/
+/**
+* @brief Get and clear UART ORE count
+* @param None
+* @retval Count value
+*/
+/******************************************************************************/
+uint32_t m1_esp32_get_and_clear_ore_count(void)
+{
+	uint32_t cnt;
+
+	taskENTER_CRITICAL();
+	cnt = esp32_uart_ore_cnt;
+	esp32_uart_ore_cnt = 0;
+	taskEXIT_CRITICAL();
+
+	return cnt;
+}
 
 
 
@@ -444,7 +509,6 @@ void m1_esp32_deinit(void)
 		esp32_init_done = FALSE;
 		esp32_uart_init_done = FALSE;
 	} // if ( esp32_init_done )
-
 } // void m1_esp32_deinit(void)
 
 
@@ -563,8 +627,25 @@ void esp32_UART_deinit(void)
 {
 	GPIO_InitTypeDef GPIO_InitStruct = {0};
 
-	/* Enable Peripheral clock */
+	/* Quiesce producers before invalidating their storage. Keep the UART
+	 * clock running until HAL has disabled the peripheral. */
+	HAL_NVIC_DisableIRQ(ESP32_UART_IRQn);
+	HAL_NVIC_DisableIRQ(ESP32_UART_DMA_Tx_IRQn);
+	if (hgpdma1_channel5_tx.Instance != NULL)
+	{
+		(void)HAL_DMA_Abort(&hgpdma1_channel5_tx);
+		if (HAL_DMA_DeInit(&hgpdma1_channel5_tx) != HAL_OK)
+		{
+			Error_Handler();
+			return;
+		}
+	}
+	if (huart_esp.Instance == UART4)
+		HAL_UART_DeInit(&huart_esp);
+	HAL_NVIC_ClearPendingIRQ(ESP32_UART_IRQn);
+	HAL_NVIC_ClearPendingIRQ(ESP32_UART_DMA_Tx_IRQn);
 	__HAL_RCC_UART4_CLK_DISABLE();
+	memset(&esp32_rb_hdl, 0, sizeof(esp32_rb_hdl));
 
 	/* UART4 GPIO Configuration
 	PA0    ------> UART4_TX (alias ESP32_RX)
@@ -576,26 +657,21 @@ void esp32_UART_deinit(void)
 	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
 	HAL_GPIO_Init(ESP32_TX_GPIO_Port, &GPIO_InitStruct);
 
-	if ( huart_esp.Instance==UART4 )
-		HAL_UART_DeInit(&huart_esp);
-	HAL_NVIC_DisableIRQ(ESP32_UART_IRQn);
-
 	if ( pesp32_rx )
 	{
 		free(pesp32_rx);
 		pesp32_rx = NULL;
 	} // if ( pesp32_rx )
 
-	// Temporarily comment out esp32_disable() to not to disable the ESP module after the task is done.
-	// If the module needs to be disabled here and enabled later,
-	// get_esp32_ready_status() must be reset (var esp32_control_ready in control.c),
-	// and reset_slave() (or equivalent) in function esp32_app_init(void) must be run again!
-	// Or
-	// Create and run NEW deinit function esp32_app_DEinit(void) do deinit all.
-	// (or manually run void control_path_deinit(void), int deinit_hosted_control_lib_internal(void), etc.)
-	// (test_disable_heartbeat(); unregister_event_callbacks();	control_path_platform_deinit();	deinit_hosted_control_lib();)
-	//
-//	esp32_disable();
+	/* Mirror the "initialized" flag esp32_UART_init() guards on - without this,
+	 * a second init in the SAME boot session (e.g. a Gate D ESP flash retry)
+	 * sees the stale TRUE left by the FIRST attempt's init and skips reiniting
+	 * UART4 entirely (clock stays disabled, RX buffer stays freed), so only a
+	 * full MCU reboot (which resets this static back to FALSE) ever recovers -
+	 * exactly the "needs a physical power cycle every time" symptom seen in Gate
+	 * D on-device testing. */
+	esp32_uart_init_done = FALSE;
+
 } // void esp32_UART_deinit(void)
 
 

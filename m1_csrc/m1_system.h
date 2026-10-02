@@ -83,7 +83,7 @@
 
 #define SYS_CONFIG_MAGIC_NUMBER    ((uint32_t)0x534A1F41)
 
-#define LCD_SAVER_PERIOD			30000 // ms
+#define LCD_SAVER_PERIOD			45000 // ms
 
 typedef struct {
 	uint32_t magic_number;
@@ -167,7 +167,7 @@ extern QueueHandle_t 		button_events_q_hdl;
 
 void system_periodic_task(void *param);
 void idle_handler_task(void *param);
-uint8_t m1_button_pressed_check(uint8_t button_id);
+uint8_t m1_button_event_check(uint8_t button_id, uint8_t event);
 void m1_buttons_status_reset(void);
 void startup_device_init(void);
 void startup_config_handler(void);

@@ -5,7 +5,8 @@
  *
  *      Author:
  */
-
+#pragma GCC push_options
+#pragma GCC optimize("O0")
 
 /*************************** I N C L U D E S **********************************/
 /* Standard includes. */
@@ -85,12 +86,14 @@ SemaphoreHandle_t usb2ser_task_semaphore;
 SemaphoreHandle_t usb2ser_tx_semaphore;
 
 uint8_t usb_tx_temp_buffer[USB_TX_BUF_SIZE];
+static uint8_t usb2ser_temp_buffer[M1_LOGDB_TX_BUFFER_SIZE];
 
-volatile uint16_t head_usart1_dma = 0;
-volatile uint16_t tail_usart1_dma = 0;
+uint16_t DEBUG_MAX_head_usartx_dma = 0;
+uint16_t DEBUG_MAX_tail_usartx_dma = 0;
 
-volatile uint16_t head_usbcdc_rx = 0;
-volatile uint16_t tail_usbcdc_rx = 0;
+volatile uint16_t head_usartx_dma = 0;
+volatile uint16_t tail_usartx_dma = 0;
+
 
 volatile uint8_t usbcdc_rx_paused = 0;
 volatile int8_t m1_USB_CDC_ready = 0;  // 0=ready, -1=not
@@ -105,23 +108,35 @@ volatile int8_t m1_USB_CDC_ready = 0;  // 0=ready, -1=not
 volatile uint8_t msc_sd_stat = STA_NOINIT;
 volatile int8_t m1_USB_MSC_ready = -1; // 0 = ready, -1=not ready
 
-#if M1_USB_MODE == M1_CFG_USB_CDC_MSC
+/****************************************/
+/* USB Composite mode configuration */
+/****************************************/
+#if M1_USB_CONFIG == M1_CFG_USB_CDC_MSC
 uint8_t MSC_EpAdd_Inst[2] = {MSC_IN_EP, MSC_OUT_EP};              /* MSC Endpoint Addresses array */
 uint8_t CDC_EpAdd_Inst[3] = {CDC_IN_EP, CDC_OUT_EP, CDC_CMD_EP};  /* CDC Endpoint Addresses array */
-#elif M1_USB_MODE == M1_CFG_USB_MSC
+#elif M1_USB_CONFIG == M1_CFG_USB_MSC
 uint8_t MSC_EpAdd_Inst[2] = {MSC_IN_EP, MSC_OUT_EP};              /* MSC Endpoint Addresses array */
-#elif M1_USB_MODE == M1_CFG_USB_CDC
+#elif M1_USB_CONFIG == M1_CFG_USB_CDC
 uint8_t CDC_EpAdd_Inst[3] = {CDC_IN_EP, CDC_OUT_EP, CDC_CMD_EP};  /* CDC Endpoint Addresses array */
 #endif
 
-uint8_t CDC_InstID = 0;
-uint8_t MSC_InstID = 0;
+volatile uint8_t CDC_InstID = 0;
+volatile uint8_t MSC_InstID = 0;
 
-#if 1
+/****************************************/
+/* USB CDC operation mode configuration */
+/****************************************/
+#if TRUE
 enCdcMode m1_usbcdc_mode = CDC_MODE_LOG_CLI;
-#else
+enCdcMode prev_usbcdc_mode = CDC_MODE_LOG_CLI;;
+#elif FALSE
 enCdcMode m1_usbcdc_mode = CDC_MODE_VCP;
+enCdcMode prev_usbcdc_mode = CDC_MODE_VCP;
+#elif FALSE
+enCdcMode m1_usbcdc_mode = CDC_MODE_ESP32;
+enCdcMode prev_usbcdc_mode = CDC_MODE_ESP32;
 #endif
+
 
 //#define TASKDELAY_Usb2Ser_handler_task  100 //ms
 //#define TASKDELAY_Ser2Usb_handler_task  100 //ms
@@ -135,7 +150,22 @@ TaskHandle_t ser2usb_task_hdl;
 uint32_t DEBUG_dma_timeout = 0;
 uint32_t DEBUG_bytes_to_send = 0;
 uint32_t DEBUG_received_bytes = 0;
-volatile uint8_t tx_cptl_usart1 = 0;
+
+volatile uint32_t dbg_usb2ser_wake = 0;
+volatile uint32_t dbg_usb2ser_bytes = 0;
+volatile uint32_t dbg_usb2ser_dma_ok = 0;
+volatile uint32_t dbg_usb2ser_dma_fail = 0;
+volatile uint32_t dbg_usb2ser_dma_loops = 0;
+volatile uint32_t dbg_ser2usb_bytes = 0;
+volatile uint32_t dbg_ser2usb_tx_ok = 0;
+volatile uint32_t dbg_ser2usb_tx_busy = 0;
+volatile uint32_t dbg_ser2usb_drop_mode = 0;
+volatile uint32_t dbg_ser2usb_drop_stream = 0;
+volatile uint32_t dbg_ser2usb_drop_txfail = 0;
+
+volatile uint8_t tx_cptl_usartx = 0;
+volatile enCdcMode cdc_tx_owner_mode = CDC_MODE_LOG_CLI;
+volatile uint8_t m1_usbcdc_drop_bridge_tx = 0;
 
 const osThreadAttr_t Usb2SerTask_attributes = {
   .name = "Usb2SerTask",
@@ -156,7 +186,6 @@ const osThreadAttr_t Ser2UsbTask_attributes = {
 uint8_t m1_usb_msc_process(void);
 uint8_t m1_usb_msc_sd_detected(void);
 void vSer2UsbTask(void *pvParameters);
-void CDC_Signal_Next_Tx(void);
 void vUsb2SerTask(void *pvParameters);
 void usart_rxupdate_head_pointer(void);
 uint16_t usart_rxget_data_length(void);
@@ -164,7 +193,6 @@ static void cdc_start_usb2ser(void);
 void m1_usb_cdc_comdefault(void);
 void m1_usb_cdc_comconfig(void);
 void usb_cdc_init(void);
-static void usb_cdc_deinit(void);
 void MX_USB_PCD_Init(void);
 void HAL_PCD_MspInit(PCD_HandleTypeDef* hpcd);
 void HAL_PCD_MspDeInit(PCD_HandleTypeDef* hpcd);
@@ -243,7 +271,7 @@ uint8_t m1_usb_msc_sd_detected(void)
 
 /*============================================================================*/
 /**
-  * @brief  USB CDC handler task - USART1 to USB CDC
+  * @brief  USB CDC handler task - USARTx to USB CDC
   * @param
   * @retval None
   */
@@ -251,6 +279,7 @@ uint8_t m1_usb_msc_sd_detected(void)
 void vSer2UsbTask(void *pvParameters)
 {
   size_t received_bytes;
+  uint8_t tx_result;
 
   UNUSED(pvParameters);
 
@@ -258,66 +287,93 @@ void vSer2UsbTask(void *pvParameters)
   usb_cdc_init();
 
   cdc_start_usb2ser();
-
   for(;;)
   {
+    /*
+     * Wait for previous USB TX completion before filling the shared TX buffer.
+     * This prevents overwriting usb_tx_temp_buffer while USB is still sending it.
+     */
+    if (xSemaphoreTake(ser2usb_task_semaphore, portMAX_DELAY) != pdTRUE)
+    {
+      continue;
+    }
+
     /* Read data from the USART RX Stream Buffer (blocking) */
     received_bytes = xStreamBufferReceive(h_uart_rx_streambuf,
                                           (void *)usb_tx_temp_buffer,
                                           sizeof(usb_tx_temp_buffer),
                                           portMAX_DELAY);
-    if (received_bytes > 0)
+    if (received_bytes == 0U)
     {
-      /* Wait for previous USB transfer to complete (return semaphore in TxCpltCallback) */
-      //if(xSemaphoreTake(ser2usb_task_semaphore, portMAX_DELAY) == pdTRUE)
-      if(xSemaphoreTake(ser2usb_task_semaphore, pdMS_TO_TICKS( 500 )) == pdTRUE)
-      {
-        if ((hUsbDeviceFS.pClassData != NULL) &&
-            (m1_USB_CDC_ready == 0))
-        {
-          /* Data transfer request */
-          if (CDC_Transmit_FS(usb_tx_temp_buffer, received_bytes) != USBD_OK)
-          { // error handling
-            // Initialize flags and immediately return semaphore when transmission fails
-            xSemaphoreGive(ser2usb_task_semaphore);
-          }
-          // semaphore is given in TxCpltCallback when successful (not returned here)
-        }
-        else
-        {
-          // usb cable plug off
-          xSemaphoreGive(ser2usb_task_semaphore);
-        }
-      }
-      else
-      { // Error !!, cancel data
-        xSemaphoreGive(ser2usb_task_semaphore);
-      }
+      xSemaphoreGive(ser2usb_task_semaphore);
+      continue;
     }
+
+    dbg_ser2usb_bytes += (uint32_t)received_bytes;
+
+    if ((m1_usbcdc_mode == CDC_MODE_LOG_CLI) || (m1_usbcdc_drop_bridge_tx != 0U))
+    {
+      // Mode switched while data was buffered: drop stale bridge payload.
+      xSemaphoreGive(ser2usb_task_semaphore);
+      dbg_ser2usb_drop_mode++;
+      continue;
+    }
+
+  #if M1_USB_CONFIG == M1_CFG_USB_CDC_MSC
+    if (hUsbDeviceFS.pClassDataCmsit[CDC_InstID] == NULL)
+  #else
+    if (hUsbDeviceFS.pClassData == NULL)
+  #endif
+    {
+      // CDC class not ready/available
+      xSemaphoreGive(ser2usb_task_semaphore);
+      dbg_ser2usb_drop_txfail++;
+      continue;
+    }
+
+    tx_result = USBD_BUSY;
+    while (1)
+    {
+      // Mode guard: stop retry if mode switched during bridge TX.
+      if ((m1_usbcdc_mode == CDC_MODE_LOG_CLI) || (m1_usbcdc_drop_bridge_tx != 0U))
+      {
+        tx_result = USBD_BUSY;
+        break;
+      }
+
+      tx_result = CDC_Transmit_FS(usb_tx_temp_buffer, received_bytes);
+      if (tx_result == USBD_OK)
+      {
+        cdc_tx_owner_mode = m1_usbcdc_mode;
+        dbg_ser2usb_tx_ok++;
+        break;
+      }
+
+      dbg_ser2usb_tx_busy++;
+      osDelay(2);
+    }
+
+    if (tx_result != USBD_OK)
+    {
+      // On failure or mode switch, release semaphore here.
+      // On success, TxCplt callback releases it.
+      xSemaphoreGive(ser2usb_task_semaphore);
+      dbg_ser2usb_drop_txfail++;
+    }
+
     //vTaskDelay(pdMS_TO_TICKS(TASKDELAY_Ser2Usb_handler_task));
     //m1_wdt_send_report(M1_REPORT_ID_SER2USB_HANDLER_TASK, TASKDELAY_Ser2Usb_handler_task);
   }
 } // void vSer2UsbTask(void *pvParameters)
 
 
-/*============================================================================*/
-/**
-  * @brief  Called by CDC_TransmitCplt_FS when a USB transfer is complete to notify the next transfer.
-  * @param
-  * @retval
-  */
-/*============================================================================*/
-void CDC_Signal_Next_Tx(void)
-{
-    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    xSemaphoreGiveFromISR(ser2usb_task_semaphore, &xHigherPriorityTaskWoken);
-    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
-}
 
 
+
+//uint32_t DEBUG_MAX_current_buffer_ptr = 0;
 /*============================================================================*/
 /**
-  * @brief  USB CDC handler task - USB CDC to USART1
+  * @brief  USB CDC handler task - USB CDC to USARTx
   * @param
   * @retval
   */
@@ -327,128 +383,105 @@ void vUsb2SerTask(void *pvParameters)
   size_t received_bytes;
   size_t bytes_to_send;
   size_t bytes_remaining;
-  uint8_t* current_buffer_ptr;
+  uint8_t *current_buffer_ptr;
   enCdcMode prev_cdc_mode = m1_usbcdc_mode;
 
   UNUSED(pvParameters);
 
   const TickType_t xMaxBlockTime = pdMS_TO_TICKS(500);
 
-  for(;;)
-  {
-#if 0
-    /* Wait indefinitely until data arrives */
-    ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100));
-
-    /* USB CDC Mode change */
-    // debug : USB CDC mode changing test
-    if (prev_cdc_mode != m1_usbcdc_mode)
+    for(;;)
     {
-      prev_cdc_mode = m1_usbcdc_mode;
-      //usb_cdc_init();
 
-      m1_usb_cdc_comconfig();
-    }
+        /* Wait indefinitely until data arrives */
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        dbg_usb2ser_wake++;
+
+
+        size_t data_available = xStreamBufferBytesAvailable(h_usb_rx_streambuf);
+        if (data_available == 0)
+            continue; // If there is no data, wait again
 
 #if 0
-                  // debug : USB CDC mode changing test
-                  #include "m1_usb_cdc_msc.h"
-                  extern enCdcMode m1_usbcdc_mode;
-
-
-                  if (m1_usbcdc_mode == CDC_MODE_LOG_CLI)
-                  {
-                    m1_usbcdc_mode = CDC_MODE_VCP;
-                  }
-                  else
-                  {
-                    m1_usbcdc_mode = CDC_MODE_LOG_CLI;
-                  }
-#endif
-
-#else
-    /* Wait indefinitely until data arrives */
-    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-#endif
-
-    size_t data_available = xStreamBufferBytesAvailable(h_usb_rx_streambuf);
-    if (data_available == 0)
-      continue; // If there is no data, wait again
-
-#if 0
-    if( xSemaphoreTake(usb2ser_tx_semaphore, portMAX_DELAY) != pdTRUE ) // Remove or keep a mutex
-    {
-    }
-#endif
-    received_bytes = xStreamBufferReceive(h_usb_rx_streambuf,
-                                          (void *)logdb_tx_buffer,
-                                          M1_LOGDB_TX_BUFFER_SIZE, 0);
-
-    if (DEBUG_received_bytes < received_bytes) DEBUG_received_bytes = received_bytes;
-
-    if (received_bytes > 0)
-    {
-      bytes_remaining = received_bytes;
-      current_buffer_ptr = logdb_tx_buffer;
-
-      while(bytes_remaining > 0)
-      {
-        bytes_to_send = (bytes_remaining > CHUNK_SIZE) ? CHUNK_SIZE : bytes_remaining;
-        //bytes_to_send = (bytes_remaining > M1_LOGDB_TX_BUFFER_SIZE) ? M1_LOGDB_TX_BUFFER_SIZE : bytes_remaining;
-
-if (DEBUG_bytes_to_send < bytes_to_send) DEBUG_bytes_to_send = bytes_to_send;
-
-        // Start USART1 transmission using GPDMA1 channel 1
-
-        tx_cptl_usart1 = 1;
-
-        if (HAL_UART_Transmit_DMA(&huart_logdb, current_buffer_ptr, bytes_to_send) == HAL_OK)
+        if( xSemaphoreTake(usb2ser_tx_semaphore, portMAX_DELAY) != pdTRUE ) // Remove or keep a mutex
         {
-#if 1
-          while (tx_cptl_usart1 == 1)
-          {
-            osDelay(1);
-            DEBUG_dma_timeout++;
-          }
-
-#else
-          /* Wait for DMA transfer to complete */
-          if(xSemaphoreTake(usb2ser_tx_semaphore, xMaxBlockTime) != pdTRUE)
-          {
-            //printf("DMA time out!\r\n");
-            HAL_UART_DMAStop(&huart_logdb);
-            huart_logdb.gState = HAL_UART_STATE_READY;
-
-DEBUG_dma_timeout++;
-            break;
-          }
+        }
 #endif
-          //osDelay(1); //osDelay(10);
-
-          current_buffer_ptr += bytes_to_send;
-          bytes_remaining -= bytes_to_send;
-        }
-        else
+        received_bytes = xStreamBufferReceive(h_usb_rx_streambuf,
+                              (void *)usb2ser_temp_buffer,
+                              M1_LOGDB_TX_BUFFER_SIZE, 0);
+        // debug-m1
+        if (DEBUG_received_bytes < received_bytes)
         {
-          //printf("HAL_UART_Transmit_DMA Failed to Start!\r\n");
-          break;
+            DEBUG_received_bytes = received_bytes;
         }
-      }
 
-      // After processing all data, if it was stopped, request to resume
-      if (usbcdc_rx_paused == 1)
-      {
-        usbcdc_rx_paused = 0;
+        if (received_bytes > 0)
+        {
+          dbg_usb2ser_bytes += (uint32_t)received_bytes;
+            bytes_remaining = received_bytes;
+            current_buffer_ptr = usb2ser_temp_buffer;
 
-        USBD_CDC_ReceivePacket(&hUsbDeviceFS);
-      }
+            while(bytes_remaining > 0)
+            {
+                bytes_to_send = (bytes_remaining > CHUNK_SIZE) ? CHUNK_SIZE : bytes_remaining;
+                //bytes_to_send = (bytes_remaining > M1_LOGDB_TX_BUFFER_SIZE) ? M1_LOGDB_TX_BUFFER_SIZE : bytes_remaining;
+
+                // debug-m1
+                if (bytes_to_send > DEBUG_bytes_to_send) DEBUG_bytes_to_send = bytes_to_send;
+
+                // Start USARTx transmission using GPDMA1 channel 1
+                tx_cptl_usartx = 1;
+
+                if (HAL_UART_Transmit_DMA(&huart_logdb, current_buffer_ptr, bytes_to_send) == HAL_OK)
+                {
+                  dbg_usb2ser_dma_ok++;
+
+                    // debug-m1
+                    DEBUG_dma_timeout = 0;
+
+                    while (tx_cptl_usartx == 1)
+                    {
+                        osDelay(1);
+
+                        // debug-m1
+                        DEBUG_dma_timeout++;
+                    dbg_usb2ser_dma_loops++;
+                    }
+                    //osDelay(1); //osDelay(10);
+
+                    current_buffer_ptr += bytes_to_send;
+                    bytes_remaining -= bytes_to_send;
+
+                    // debug-m1
+                    //if ((current_buffer_ptr-logdb_tx_buffer) > DEBUG_MAX_current_buffer_ptr)
+                    //    DEBUG_MAX_current_buffer_ptr = (current_buffer_ptr-logdb_tx_buffer);
+                }
+                else
+                {
+                  dbg_usb2ser_dma_fail++;
+                    //printf("HAL_UART_Transmit_DMA Failed to Start!\r\n");
+                    break;
+                }
+            }
+
+            // After processing all data, if it was stopped, request to resume
+            if (usbcdc_rx_paused == 1)
+            {
+                usbcdc_rx_paused = 0;
+      #if M1_USB_CONFIG == M1_CFG_USB_CDC_MSC
+              USBD_CDC_ReceivePacket(&hUsbDeviceFS, CDC_InstID);
+      #else
+                USBD_CDC_ReceivePacket(&hUsbDeviceFS);
+      #endif
+            }
+        }
+
+        // if (xCommsSemaphore != NULL) xSemaphoreGive(xCommsSemaphore); // Returning a mutex
+
+        //vTaskDelay(pdMS_TO_TICKS(TASKDELAY_Usb2Ser_handler_task));
+        //m1_wdt_send_report(M1_REPORT_ID_USB2SER_HANDLER_TASK, TASKDELAY_Usb2Ser_handler_task);
     }
-
-    // if (xCommsSemaphore != NULL) xSemaphoreGive(xCommsSemaphore); // Returning a mutex
-
-    //vTaskDelay(pdMS_TO_TICKS(TASKDELAY_Usb2Ser_handler_task));
-    //m1_wdt_send_report(M1_REPORT_ID_USB2SER_HANDLER_TASK, TASKDELAY_Usb2Ser_handler_task);
-  }
 } // void vUsb2SerTask(void *pvParameters)
 
 
@@ -461,7 +494,12 @@ DEBUG_dma_timeout++;
 /*============================================================================*/
 void usart_rxupdate_head_pointer(void)
 {
-  head_usart1_dma = (M1_LOGDB_RX_BUFFER_SIZE - __HAL_DMA_GET_COUNTER(huart_logdb.hdmarx)) % M1_LOGDB_RX_BUFFER_SIZE;
+ 
+  head_usartx_dma =
+          (M1_LOGDB_RX_BUFFER_SIZE - __HAL_DMA_GET_COUNTER(huart_logdb.hdmarx)) % M1_LOGDB_RX_BUFFER_SIZE;
+
+// debug-m1
+if (head_usartx_dma > DEBUG_MAX_head_usartx_dma) DEBUG_MAX_head_usartx_dma = head_usartx_dma;
 }
 
 
@@ -474,11 +512,11 @@ void usart_rxupdate_head_pointer(void)
 /*============================================================================*/
 uint16_t usart_rxget_data_length(void)
 {
-  if (head_usart1_dma >= tail_usart1_dma) {
-      return head_usart1_dma - tail_usart1_dma;
-  } else {
-    return M1_LOGDB_RX_BUFFER_SIZE - tail_usart1_dma + head_usart1_dma;
-  }
+    if (head_usartx_dma >= tail_usartx_dma) {
+        return head_usartx_dma - tail_usartx_dma;
+    } else {
+        return M1_LOGDB_RX_BUFFER_SIZE - tail_usartx_dma + head_usartx_dma;
+    }
 }
 
 
@@ -494,8 +532,9 @@ void usart_rxdata_process_from_isr(void)
 {
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
     uint16_t current_len;
+  size_t sent_total = 0U;
 
-    uint16_t prev_tail = tail_usart1_dma; // Temporarily save the current tail position
+    uint16_t prev_tail = tail_usartx_dma; // Temporarily save the current tail position
     current_len = usart_rxget_data_length();   // Calculate total length to process
 
     if (current_len > 0) {
@@ -503,14 +542,19 @@ void usart_rxdata_process_from_isr(void)
         uint16_t part2_len = current_len - part1_len;
 
         if (part1_len > 0) {
-            xStreamBufferSendFromISR(h_uart_rx_streambuf, (void*)&logdb_rx_buffer[prev_tail], part1_len, &xHigherPriorityTaskWoken);
+      sent_total += xStreamBufferSendFromISR(h_uart_rx_streambuf, (void*)&logdb_rx_buffer[prev_tail], part1_len, &xHigherPriorityTaskWoken);
         }
         if (part2_len > 0) {
-            xStreamBufferSendFromISR(h_uart_rx_streambuf, (void*)&logdb_rx_buffer, part2_len, &xHigherPriorityTaskWoken);
+      sent_total += xStreamBufferSendFromISR(h_uart_rx_streambuf, (void*)&logdb_rx_buffer[0], part2_len, &xHigherPriorityTaskWoken);
         }
 
-        // Update the volatile variable tail only after data copying is complete
-        tail_usart1_dma = (prev_tail + current_len) % M1_LOGDB_RX_BUFFER_SIZE;
+    if (sent_total < current_len)
+    {
+      dbg_ser2usb_drop_stream += (uint32_t)(current_len - sent_total);
+    }
+
+    // Advance by actually queued bytes so we don't silently lose tail data.
+    tail_usartx_dma = (prev_tail + (uint16_t)sent_total) % M1_LOGDB_RX_BUFFER_SIZE;
     }
 
     portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
@@ -526,19 +570,19 @@ void usart_rxdata_process_from_isr(void)
 /*============================================================================*/
 static void cdc_start_usb2ser(void)
 {
-  // Prepare usart1 rx to usb tx */
+  // Prepare usartx rx to usb tx */
   h_uart_rx_streambuf = xStreamBufferCreate(RXSTREAMBUF_UART_SIZE, 1);
   ser2usb_task_semaphore = xSemaphoreCreateBinary();
   xSemaphoreGive(ser2usb_task_semaphore);
 
-  /* Prepare usb rx to usart tx */
+  /* Prepare usb rx to usartx tx */
   h_usb_rx_streambuf = xStreamBufferCreate(RXSTREAMBUF_USB_SIZE, 1);
 
   usb2ser_task_semaphore = xSemaphoreCreateBinary();
   xSemaphoreGive(usb2ser_task_semaphore);
 
-  usb2ser_tx_semaphore = xSemaphoreCreateBinary();
-  xSemaphoreGive(usb2ser_tx_semaphore);
+//  usb2ser_tx_semaphore = xSemaphoreCreateBinary();
+//  xSemaphoreGive(usb2ser_tx_semaphore);
 
   usb2ser_task_hdl = osThreadNew(vUsb2SerTask, NULL, &Usb2SerTask_attributes);
 }
@@ -554,6 +598,8 @@ static void cdc_start_usb2ser(void)
 /*============================================================================*/
 void m1_usb_cdc_comdefault(void)
 {
+  linecoding.bitrate = huart_logdb.Init.BaudRate;
+
   /* Stop bit */
   if (huart_logdb.Init.StopBits == UART_STOPBITS_1)
     linecoding.format = 0;
@@ -590,10 +636,7 @@ void m1_usb_cdc_comdefault(void)
 /*============================================================================*/
 void m1_usb_cdc_comconfig(void)
 {
-	/* Deinitialize USART1 */
-	m1_logdb_deinit();
-
-	/* Initialize USART1 */
+	/* Initialize USARTx */
 	/* Stop bit */
 	switch (linecoding.format)
 	{
@@ -656,7 +699,25 @@ void m1_usb_cdc_comconfig(void)
 
 	huart_logdb.Init.BaudRate = linecoding.bitrate;
 
-	m1_logdb_init();
+    if (HAL_UART_Init(&huart_logdb) != HAL_OK)
+    {
+        Error_Handler();
+    }
+
+    if (HAL_UARTEx_SetTxFifoThreshold(&huart_logdb, UART_TXFIFO_THRESHOLD_1_8) != HAL_OK)
+    {
+      Error_Handler();
+    }
+
+    if (HAL_UARTEx_SetRxFifoThreshold(&huart_logdb, UART_RXFIFO_THRESHOLD_1_8) != HAL_OK)
+    {
+      Error_Handler();
+    }
+
+    if (HAL_UARTEx_DisableFifoMode(&huart_logdb) != HAL_OK)
+    {
+      Error_Handler();
+    }
 }
 
 /*============================================================================*/
@@ -669,18 +730,13 @@ void m1_usb_cdc_comconfig(void)
 /*============================================================================*/
 void usb_cdc_init(void)
 {
-////  __disable_irq();
-//
   m1_usb_cdc_comdefault();
-//  m1_usb_cdc_comconfig();
-//
-////  __enable_irq();
 
-  head_usart1_dma = 0;
-  tail_usart1_dma = 0;
+  head_usartx_dma = 0;
+  tail_usartx_dma = 0;
 
-  head_usbcdc_rx = 0;
-  tail_usbcdc_rx = 0;
+//  head_usbcdc_rx = 0;
+//  tail_usbcdc_rx = 0;
 
   usbcdc_rx_paused = 0;
   m1_USB_CDC_ready = 0;
@@ -694,18 +750,35 @@ void usb_cdc_init(void)
 
 /*============================================================================*/
 /**
-  * @brief USB-CDC Deinitialization Function
-  * @param  None
+  * @brief Force USB CDC soft reconnect (host-side port reset equivalent)
+  * @param None
   * @retval None
   */
 /*============================================================================*/
-static void usb_cdc_deinit(void)
+void m1_usb_cdc_force_reconnect(void)
 {
-  if (hpcd_USB_DRD_FS.State != HAL_PCD_STATE_RESET)
+  if (hpcd_USB_DRD_FS.State == HAL_PCD_STATE_RESET)
   {
-    USBD_DeInit(&hUsbDeviceFS);
+    return;
   }
-} // void usb_cdc_deinit(void)
+
+  (void)USBD_Stop(&hUsbDeviceFS);
+  (void)HAL_PCD_DevDisconnect(&hpcd_USB_DRD_FS);
+  osDelay(40);
+
+  (void)HAL_PCD_DevConnect(&hpcd_USB_DRD_FS);
+  (void)USBD_Start(&hUsbDeviceFS);
+  osDelay(40);
+
+  CDC_Rearm_FS();
+
+  if (ser2usb_task_semaphore != NULL)
+  {
+    xSemaphoreGive(ser2usb_task_semaphore);
+  }
+}
+
+
 
 
 /*============================================================================*/
@@ -741,7 +814,7 @@ void MX_USB_PCD_Init(void)
   if(USBD_Init(&hUsbDeviceFS, &Class_Desc, 0) != USBD_OK)
         Error_Handler();
 
-#if M1_USB_MODE == M1_CFG_USB_CDC_MSC
+#if M1_USB_CONFIG == M1_CFG_USB_CDC_MSC
   /* Store the MSC Class ID */
   MSC_InstID = hUsbDeviceFS.classId;
 
@@ -769,7 +842,7 @@ void MX_USB_PCD_Init(void)
     /* Add callbacks for CDC Class */
     USBD_CDC_RegisterInterface(&hUsbDeviceFS, &USBD_CDC_Interface_fops);
   }
-#elif M1_USB_MODE == M1_CFG_USB_MSC
+#elif M1_USB_CONFIG == M1_CFG_USB_MSC
   /* Add Class MSC */
   if (USBD_RegisterClass(&hUsbDeviceFS, &USBD_MSC) != USBD_OK)
         Error_Handler();
@@ -778,7 +851,7 @@ void MX_USB_PCD_Init(void)
         Error_Handler();
 
 
-#elif M1_USB_MODE == M1_CFG_USB_CDC
+#elif M1_USB_CONFIG == M1_CFG_USB_CDC
   /* Add Class CDC */
   if (USBD_RegisterClass(&hUsbDeviceFS, &USBD_CDC) != USBD_OK)
         Error_Handler();
@@ -844,7 +917,10 @@ void HAL_PCD_MspInit(PCD_HandleTypeDef* hpcd)
     __HAL_RCC_USB_CLK_ENABLE();
 
     /* USB_DRD_FS interrupt Init */
-    HAL_NVIC_SetPriority(USB_DRD_FS_IRQn, configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY+1, 5); //configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY + 1, 5);
+
+    //HAL_NVIC_SetPriority(USB_DRD_FS_IRQn, configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY+1, 5); //configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY + 1, 5);
+    HAL_NVIC_SetPriority(USB_DRD_FS_IRQn, configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY+1, 0);
+
     HAL_NVIC_EnableIRQ(USB_DRD_FS_IRQn);
 
     /* USER CODE BEGIN USB_DRD_FS_MspInit 1 */
@@ -881,4 +957,4 @@ void HAL_PCD_MspDeInit(PCD_HandleTypeDef* hpcd)
   }
 } // void HAL_PCD_MspDeInit(PCD_HandleTypeDef* hpcd)
 
-
+#pragma GCC push_options

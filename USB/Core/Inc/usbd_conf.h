@@ -47,14 +47,20 @@ extern "C" {
 #define M1_CFG_USB_CDC      2
 #define M1_CFG_USB_MSC      3
 
-#define M1_USB_MODE         M1_CFG_USB_CDC_MSC //M1_CFG_USB_MSC
+#if 1 // Enable CDC+MSC composite mode
+#define M1_USB_CONFIG       M1_CFG_USB_CDC_MSC
+#elif 0
+#define M1_USB_CONFIG       M1_CFG_USB_MSC
+#else
+#define M1_USB_CONFIG       M1_CFG_USB_CDC
+#endif
 
 /** @defgroup USBD_CONF_Exported_Defines
   * @{
   */
 
 /* Common Config */
-#if M1_USB_MODE == M1_CFG_USB_CDC_MSC
+#if M1_USB_CONFIG == M1_CFG_USB_CDC_MSC
   /*
    * Compisite CDC+MSC
    *
@@ -90,7 +96,7 @@ extern "C" {
 #define CDC_OUT_EP                                  0x02U   /* Bulk OUT, CDC */
 #define CDC_CMD_EP                                  0x83U   /* Interrupt, CDC commands */
 
-#elif M1_USB_MODE == M1_CFG_USB_MSC
+#elif M1_USB_CONFIG == M1_CFG_USB_MSC
   /*
    * MSC only
    *
@@ -113,12 +119,12 @@ extern "C" {
 #define CDC_OUT_EP                                  0x02U   /* Bulk OUT, CDC */
 #define CDC_CMD_EP                                  0x85U   /* Interrupt, CDC commands */
 
-#elif M1_USB_MODE == M1_CFG_USB_CDC
+#elif M1_USB_CONFIG == M1_CFG_USB_CDC
   /*
    * CDC only
    *
   **/
-#define USBD_MAX_NUM_INTERFACES                     1U
+#define USBD_MAX_NUM_INTERFACES                     2U
 #define USBD_MAX_NUM_CONFIGURATION                  1U
 #define USBD_MAX_STR_DESC_SIZ                       0x100U
 #define USBD_SELF_POWERED                           1U

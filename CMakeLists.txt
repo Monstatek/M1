@@ -29,16 +29,26 @@ include("cmake/gcc-arm-none-eabi.cmake")
 # Enable compile command to ease indexing with e.g. clangd
 set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
 
-# Core project settings
-project(${CMAKE_PROJECT_NAME})
-
 # Enable CMake support for ASM and C languages
 enable_language(C ASM)
 
+# Core project settings
+project(${CMAKE_PROJECT_NAME})
 message("Build type: " ${CMAKE_BUILD_TYPE})
 
 # Create an executable object type
 add_executable(${CMAKE_PROJECT_NAME})
+
+# Reproducible builds: strip the absolute source-tree prefix from __FILE__ and
+# from debug paths, so two clean builds of the same commit made in different
+# directories are byte-identical. A few diagnostic strings embed __FILE__
+# (the custom assert_param in m1_csrc/m1_compile_cfg.h, and two M1_LOG_I calls
+# in m1_csrc/m1_sdcard_man.c); this makes them source-root-relative instead of
+# carrying the build machine's absolute path. Operational behavior is
+# unchanged -- only the text of those diagnostic paths differs.
+target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE
+    "-ffile-prefix-map=${CMAKE_SOURCE_DIR}=."
+)
 
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/m1_01)
@@ -122,3 +132,51 @@ add_custom_command(
 ${TARGET_BIN} -binary -crop 0x0 0x000FFC14 -STM32_Little_Endian 0x000FFC14 -o ${CMAKE_BINARY_DIR}/${CMAKE_PROJECT_NAME}_wCRC.bin -binary
     #COMMENT "Generating .bin file with CRC"
 )
+
+# Post-build regression guard: when the production MFC raw-emulation flags
+# are on, prove via symbol/map evidence (not log strings) that the canonical
+# RAWOWN listener/dispatcher and the DMA {At} transmitter actually made it
+# into the link -- fails the build if a future change silently drops or
+# renames them. See cmake/m1_01/verify_mfc_raw_hwpass.sh for the exact
+# symbol list. Must live in this file (not cmake/m1_01/CMakeLists.txt):
+# add_custom_command(TARGET ... POST_BUILD) is only valid in the directory
+# scope where the target was created by add_executable()/add_library().
+find_program(M1_NM_TOOL NAMES arm-none-eabi-nm)
+if(M1_MFC_RAW_EMULATION AND M1_MFC_DMA_AT)
+    if(M1_NM_TOOL)
+        add_custom_command(TARGET ${CMAKE_PROJECT_NAME} POST_BUILD
+            COMMAND sh "${CMAKE_SOURCE_DIR}/cmake/m1_01/verify_mfc_raw_hwpass.sh"
+                    "${M1_NM_TOOL}" "$<TARGET_FILE:${CMAKE_PROJECT_NAME}>"
+            COMMENT "Verifying production MFC raw-emulation symbols are linked"
+            VERBATIM)
+        # Single-authoritative-MFC-implementation structural guard: fails the
+        # build if any obsolete generic-Type-A route or the deleted duplicate
+        # Flow-B crypto backend (symbol, source pattern, or CMake option)
+        # reappears, and if any REQUIRED authoritative RAWOWN/Crypto1/DMA symbol
+        # is missing. Combines ELF-symbol, source, and configuration evidence
+        # (see cmake/m1_01/mfc_authoritative_manifest.txt).
+        add_custom_command(TARGET ${CMAKE_PROJECT_NAME} POST_BUILD
+            COMMAND sh "${CMAKE_SOURCE_DIR}/cmake/m1_01/verify_mfc_arch.sh"
+                    "${M1_NM_TOOL}" "$<TARGET_FILE:${CMAKE_PROJECT_NAME}>"
+                    "${CMAKE_SOURCE_DIR}"
+            COMMENT "Verifying single authoritative MFC implementation (no obsolete/duplicate routes)"
+            VERBATIM)
+    else()
+        message(WARNING "arm-none-eabi-nm not found -- skipping MFC raw-emulation symbol verification")
+    endif()
+endif()
+
+# Post-build hardware-acceptance checkpoint guard: independent of the MFC
+# flags above, this protects every production path covered by a recorded
+# hardware-accepted checkpoint (MFC, LF RFID, Sub-GHz, storage/LED -- see
+# documentation/hardware-acceptance/ and cmake/m1_01/hwpass_protected_
+# paths_manifest.txt) by diffing each protected path against the checkpoint
+# git ref, and (when an nm tool is available) confirming forbidden symbols
+# like lfrfid_fsk_osc stay absent from the linked ELF. Fails the build, and
+# names the invalidated subsystem(s), if a protected path differs without a
+# newer accepted checkpoint.
+add_custom_command(TARGET ${CMAKE_PROJECT_NAME} POST_BUILD
+    COMMAND sh "${CMAKE_SOURCE_DIR}/cmake/m1_01/verify_hwpass_protected_paths.sh"
+            "${CMAKE_SOURCE_DIR}" "${M1_NM_TOOL}" "$<TARGET_FILE:${CMAKE_PROJECT_NAME}>"
+    COMMENT "Verifying protected paths match the accepted hardware checkpoint"
+    VERBATIM)

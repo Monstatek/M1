@@ -87,10 +87,13 @@ DRESULT m1_sdcard_ioctl(uint8_t param, uint8_t cmd, void *buff);
 S_M1_SDCard_Init_Status m1_sdcard_init(SD_HandleTypeDef *phsdcard);
 S_M1_SDCard_Init_Status m1_sdcard_init_ex(void);
 S_M1_SDCard_Init_Status m1_sdcard_init_retry(void);
-void m1_sdcard_mount(void);
-void m1_sdcard_unmount(void);
+/* Synchronous task-context results; do not infer success from cached status.
+ * Mount returns the first failing mount/free-space result. */
+FRESULT m1_sdcard_mount(void);
+FRESULT m1_sdcard_unmount(void);
 uint8_t m1_sdcard_format(void);
-void m1_sdcard_set_status(S_M1_SDCard_Access_Status stat);
+/* Request reinitialization; callers cannot publish an arbitrary ready state. */
+void m1_sdcard_invalidate(void);
 S_M1_SDCard_Access_Status m1_sdcard_get_status(void);
 uint8_t m1_sd_detected(void);
 char *m1_sd_error_msg(S_M1_SDCard_Access_Status ferr);

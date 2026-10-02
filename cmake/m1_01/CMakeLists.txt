@@ -8,12 +8,90 @@ add_library(m1_01 INTERFACE)
 # Enable CMake support for ASM and C languages
 enable_language(C ASM)
 
-target_compile_definitions(m1_01 INTERFACE 
-	USE_HAL_DRIVER 
+target_compile_definitions(m1_01 INTERFACE
+	USE_HAL_DRIVER
 	STM32H573xx
     STM32_THREAD_SAFE_STRATEGY=4
     $<$<CONFIG:Debug>:DEBUG>
 )
+
+# --- MIFARE Classic raw card-emulation build toggles (Scope B) --------------
+# M1_MFC_RAW_EMULATION and M1_MFC_DMA_AT are the ONE supported production
+# configuration -- both ON, always. There is no supported OFF/generic-
+# ISO14443A-only firmware variant: a build that cannot emulate MIFARE
+# Classic is not a legitimate release candidate, so configuration FAILS
+# below rather than silently producing one. Both default to ON (a bare
+# `cmake ..` with no -D flags already configures the one supported build);
+# the option() cache entries exist only so an explicit override is possible
+# to TEST -- and is then immediately refused by the guard beneath this
+# block, not honored.
+option(M1_MFC_RAW_EMULATION "Master gate for all MFC raw-emulation code (must stay ON -- see the guard below)" ON)
+option(M1_MFC_DMA_AT "{At} via TIM7 + dual-GPDMA1 transport (must stay ON -- see the guard below)" ON)
+
+foreach(_m1_mfc_flag
+        M1_MFC_RAW_EMULATION   # master gate for all raw-emulation code
+        M1_MFC_DMA_AT          # {At} via TIM7 + dual-GPDMA1 transport
+        MFC_ROUTE_PROBE        # unconditional RF-path probe (no crypto/cache)
+        M1_MFC_AT_RX_DIAG)     # reader-side [AT-RX] capture diagnostic
+    if(${_m1_mfc_flag})
+        target_compile_definitions(m1_01 INTERFACE ${_m1_mfc_flag})
+    endif()
+endforeach()
+
+# Configure-time regression guard, unconditional: EITHER flag left off
+# (explicitly, or by whatever default a future edit might introduce) fails
+# configuration outright -- one guard, not two, so there is a single place
+# that defines what "supported configuration" means. Without a production
+# {At} transmitter, MIFARE Classic AUTH is detected and dispatched but the
+# device can never answer it (nfc_listener.c's {At} TX site has no fallback
+# branch when M1_MFC_DMA_AT is not defined; the TIM7 + dual-GPDMA1 transport
+# is the SOLE production {At} transport -- the former bit-bang concept-proof
+# alternative has been physically removed) -- and without RAW_EMULATION
+# itself, the shipped firmware
+# cannot emulate MIFARE Classic at all, which this project no longer treats
+# as a legitimate release variant.
+if(NOT M1_MFC_RAW_EMULATION OR NOT M1_MFC_DMA_AT)
+    message(FATAL_ERROR
+        "M1_MFC_RAW_EMULATION=ON and M1_MFC_DMA_AT=ON are REQUIRED -- there "
+        "is exactly one supported production configuration and generic "
+        "ISO14443A-only firmware (MFC raw emulation and/or its {At} "
+        "transmitter disabled) is not a legitimate build. Do not pass "
+        "-DM1_MFC_RAW_EMULATION=OFF or -DM1_MFC_DMA_AT=OFF; both already "
+        "default to ON.")
+endif()
+
+# --- LF RFID PSK acquisition architecture + Honeywell NexWatch ----------
+# Keri and Honeywell/NexWatch read/emulate/write are intended production
+# functionality, so a fresh development/release configure must include the
+# ASK<->PSK dual-pass acquisition path and the NexWatch protocol without
+# relying on remembered command-line flags.
+option(LFRFID_PSK_PASS_ENABLED "Enable ASK<->PSK dual-pass LF acquisition" ON)
+option(LFRFID_NEXWATCH_ENABLED "Enable Honeywell NexWatch LF protocol" ON)
+
+if(LFRFID_NEXWATCH_ENABLED AND NOT LFRFID_PSK_PASS_ENABLED)
+    message(FATAL_ERROR
+        "LFRFID_NEXWATCH_ENABLED requires LFRFID_PSK_PASS_ENABLED; "
+        "NexWatch must not be built without its PSK acquisition path.")
+endif()
+
+foreach(_lfrfid_flag
+        LFRFID_PSK_PASS_ENABLED
+        LFRFID_NEXWATCH_ENABLED)
+    if(${_lfrfid_flag})
+        target_compile_definitions(m1_01 INTERFACE ${_lfrfid_flag})
+    endif()
+endforeach()
+
+# Build identity for the emulation [BUILD] banner. Pass the exact (already-
+# committed) short SHA + clean flag at configure time, e.g.:
+#   -DM1_GIT_COMMIT=<sha> -DM1_GIT_DIRTY=0
+# Only forwarded when provided, so the OFF/normal build is unaffected.
+if(DEFINED M1_GIT_COMMIT)
+    target_compile_definitions(m1_01 INTERFACE M1_GIT_COMMIT="${M1_GIT_COMMIT}")
+endif()
+if(DEFINED M1_GIT_DIRTY)
+    target_compile_definitions(m1_01 INTERFACE M1_GIT_DIRTY=${M1_GIT_DIRTY})
+endif()
 
 target_include_directories(m1_01 INTERFACE
     ../../Core/Inc
@@ -34,11 +112,16 @@ target_include_directories(m1_01 INTERFACE
     ../../FatFs/R015
     ../../Sub_Ghz
     ../../Sub_Ghz/protocols
+    ../../Sub_Ghz/modules
     ../../Esp32_serial_flasher/include
     ../../Esp32_serial_flasher/port
     ../../Esp32_serial_flasher/app/common
     ../../Esp32_serial_flasher/private_include
-    ../../Esp_spi_at/build/include/
+    # Tracked, minimal stand-in for ESP-IDF's generated sdkconfig.h (see
+    # m1_csrc/esp_stub/sdkconfig.h). Replaces the former dependency on the
+    # git-ignored, generated ../../Esp_spi_at/build/include/ directory so a
+    # clean checkout configures/builds without any Esp_spi_at/build/ present.
+    ../../m1_csrc/esp_stub
     ../../Esp_spi_at/esp-idf/components/esp_common/include
     ../../Esp_spi_at/esp-idf/components/esp_driver_spi/include/driver
     ../../Esp_spi_at/esp-idf/components/hal/include/hal
@@ -62,13 +145,14 @@ target_include_directories(m1_01 INTERFACE
     ../../USB/Class/CompositeBuilder/Src
     ../../USB/Class/MSC/Inc
     ../../USB/Class/MSC/Src
+    ../../USB/Class/HID/Inc
     ../../USB/Core/Inc
     ../../USB/Core/Scr
 )
 
 target_sources(m1_01 INTERFACE
     ../../Battery/battery.c
-    ../../Battery/battery_log.c
+    ../../Battery/soh_filter.c
     ../../Core/Src/FreeRTOS_CLI.c
     ../../Core/Src/app_freertos.c
     ../../Core/Src/cli_app.c
@@ -134,7 +218,15 @@ target_sources(m1_01 INTERFACE
     ../../Drivers/u8g2_csrc/u8g2_d_memory.c
     ../../Drivers/u8g2_csrc/u8g2_d_setup.c
     ../../Drivers/u8g2_csrc/u8g2_font.c
-    ../../Drivers/u8g2_csrc/u8g2_fonts.c
+    # u8g2_fonts.c (the full ~1987-font upstream catalog, ~38 MB source,
+    # ~58 s to compile alone) is intentionally NOT built. Only the 13 fonts
+    # this firmware actually links are compiled, via a byte-exact generated
+    # extraction -- see Drivers/u8g2_csrc/tools/extract_selected_fonts.py
+    # for exactly how, why, and the verification (byte-for-byte identical
+    # compiled font data vs. the full catalog, confirmed via objcopy) this
+    # is safe. u8g2_fonts.c itself is untouched in the tree for provenance
+    # and as the source for adding a new font later.
+    ../../Drivers/u8g2_csrc/u8g2_fonts_selected.c
     ../../Drivers/u8g2_csrc/u8g2_hvline.c
     ../../Drivers/u8g2_csrc/u8g2_input_value.c
     ../../Drivers/u8g2_csrc/u8g2_intersection.c
@@ -240,7 +332,6 @@ target_sources(m1_01 INTERFACE
     ../../Drivers/u8g2_csrc/u8x8_d_uc1701_mini12864.c
     ../../Drivers/u8g2_csrc/u8x8_debounce.c
     ../../Drivers/u8g2_csrc/u8x8_display.c
-    ../../Drivers/u8g2_csrc/u8x8_fonts.c
     ../../Drivers/u8g2_csrc/u8x8_gpio.c
     ../../Drivers/u8g2_csrc/u8x8_input_value.c
     ../../Drivers/u8g2_csrc/u8x8_message.c
@@ -303,17 +394,58 @@ target_sources(m1_01 INTERFACE
     ../../NFC/Middlewares/ST/rfal/Src/rfal_t2t.c
     ../../NFC/Middlewares/ST/rfal/Src/rfal_t4t.c
     ../../NFC/NFC_drv/common/nfc_ctx.c
+    ../../NFC/NFC_drv/common/mf_desfire_parse.c
+    ../../NFC/NFC_drv/common/nfc_transit_clipper.c
+    ../../NFC/NFC_drv/common/crypto1.c
+    ../../NFC/NFC_drv/common/crypto1_recover.c
+    ../../NFC/NFC_drv/common/mfc_harvest.c
+    ../../NFC/NFC_drv/common/mfc_harvest_storage.c
+    ../../NFC/NFC_drv/common/mfc_dict_solver.c
+    ../../NFC/NFC_drv/common/mfc_access.c
+    ../../NFC/NFC_drv/common/nfc_add_image.c
+    ../../NFC/NFC_drv/common/ce_mfc_xport.c
+    ../../NFC/NFC_drv/common/m1_nfc_raw_hal.c
+    ../../NFC/NFC_drv/common/m1_mfc_raw_listener.c
+    ../../NFC/NFC_drv/common/m1_mfc_session.c
+    ../../NFC/NFC_drv/common/m1_mfc_raw_session_hw.c
+    ../../NFC/NFC_drv/common/m1_mfc_emu_image.c
+    ../../NFC/NFC_drv/common/m1_t2t_emu_image.c
+    ../../NFC/NFC_drv/common/m1_mfc_fast.c
+    ../../NFC/NFC_drv/common/m1_at_wave.c
+    ../../NFC/NFC_drv/common/m1_at_edges.c
+    ../../NFC/NFC_drv/common/m1_mfc_dma.c
+    ../../NFC/NFC_drv/common/ce_mfc.c
+    ../../NFC/NFC_drv/common/mfc_capture.c
+    ../../NFC/NFC_drv/common/mfc_key_source.c
+    ../../NFC/NFC_drv/common/nfc_dict_line.c
+    ../../NFC/NFC_drv/common/mfc_key_source_sd.c
+    ../../NFC/NFC_drv/common/mfc_result.c
+    ../../NFC/NFC_drv/common/mfc_identity.c
+    ../../NFC/NFC_drv/common/mfc_dict_resume.c
+    ../../NFC/NFC_drv/common/mfc_dict_phase.c
+    ../../NFC/NFC_drv/common/nfc_hex_utils.c
+    ../../NFC/NFC_drv/common/mfc_block_render.c
+    ../../NFC/NFC_drv/common/mfc_keys.c
+    ../../NFC/NFC_drv/common/ulc_keys.c
+    ../../NFC/NFC_drv/common/ntag_pwd_keys.c
     ../../NFC/NFC_drv/common/nfc_file.c
     ../../NFC/NFC_drv/common/nfc_fileio.c
     ../../NFC/NFC_drv/common/nfc_storage.c
     ../../NFC/NFC_drv/legacy/nfc_driver.c
     ../../NFC/NFC_drv/legacy/nfc_listener.c
+    ../../NFC/NFC_drv/legacy/m1_t2t_transport.c
+    ../../NFC/NFC_drv/legacy/mfc_detect.c
+    ../../NFC/NFC_drv/legacy/m1_desfire.c
     ../../NFC/NFC_drv/legacy/nfc_poller.c
     ../../NFC/app_x-cube-nfcx.c
     ../../Sub_Ghz/datatypes_utils.c
     ../../Sub_Ghz/m1_sub_ghz_api.c
     ../../Sub_Ghz/m1_sub_ghz_decenc.c
     ../../Sub_Ghz/protocols/m1_princeton_decode.c
+    ../../Sub_Ghz/protocols/m1_subghz_pwm_decode.c
+    ../../Sub_Ghz/modules/subghz_mod_linear.c
+    ../../Sub_Ghz/modules/subghz_mod_fixedcode.c
+    ../../Sub_Ghz/modules/subghz_modules.c
     ../../Sub_Ghz/protocols/m1_secplus_v2_decode.c
     ../../USB/Class/CDC/Src/usbd_cdc.c
     ../../USB/Class/CDC/Src/usbd_cdc_if.c
@@ -323,35 +455,65 @@ target_sources(m1_01 INTERFACE
     ../../USB/Class/MSC/Src/usbd_msc_data.c
     ../../USB/Class/MSC/Src/usbd_msc_scsi.c
     ../../USB/Class/MSC/Src/usbd_msc_storage.c
+    ../../USB/Class/HID/Src/usbd_hid_m1.c
     ../../USB/Core/Src/usbd_conf.c
     ../../USB/Core/Src/usbd_core.c
     ../../USB/Core/Src/usbd_ctlreq.c
     ../../USB/Core/Src/usbd_desc.c
     ../../USB/Core/Src/usbd_ioreq.c
     ../../lfrfid/lfrfid.c
+    ../../lfrfid/lfrfid_dma_tx.c
+    ../../lfrfid/lfrfid_psk1_wave.c
     ../../lfrfid/lfrfid_file.c
     ../../lfrfid/lfrfid_hal.c
     ../../lfrfid/lfrfid_protocol.c
     ../../lfrfid/lfrfid_protocol_em4100.c
     ../../lfrfid/lfrfid_protocol_h10301.c
+    ../../lfrfid/lfrfid_protocol_pyramid.c
+    ../../lfrfid/lfrfid_protocol_ioprox.c
+    ../../lfrfid/lfrfid_protocol_awid.c
+    ../../lfrfid/lfrfid_protocol_securakey.c
+    ../../lfrfid/lfrfid_protocol_jablotron.c
+    ../../lfrfid/lfrfid_protocol_fdx_b.c
+    ../../lfrfid/lfrfid_protocol_hid_generic.c
+    ../../lfrfid/lfrfid_protocol_hid_ex_generic.c
+    ../../lfrfid/lfrfid_protocol_keri.c
+    ../../lfrfid/lfrfid_protocol_nexwatch.c
     ../../lfrfid/t5577.c
     ../../m1_csrc/res_string.c
     ../../m1_csrc/bit_util.c
     ../../m1_csrc/logger.c
     ../../m1_csrc/m1_bq25896.c
     ../../m1_csrc/m1_bq27421.c
+    ../../m1_csrc/m1_bq27421_boot_guard.c
     ../../m1_csrc/m1_bt.c
     ../../m1_csrc/m1_buzzer.c
     ../../m1_csrc/m1_cli.c
     ../../m1_csrc/m1_cli_help.c
     ../../m1_csrc/m1_core_config.c
+    ../../m1_csrc/m1_capture_frame.c
+    ../../m1_csrc/m1_capture_link.c
+    ../../m1_csrc/m1_capture_pcap.c
+    ../../m1_csrc/m1_capture_scan_parse.c
+    ../../m1_csrc/m1_capture_transport.c
+    ../../m1_csrc/m1_cobs.c
+    ../../m1_csrc/m1_crc32c.c
     ../../m1_csrc/m1_display.c
     ../../m1_csrc/m1_display_data.c
+    ../../m1_csrc/m1_esp32_flash_session.c
+    ../../m1_csrc/m1_esp32_perf.c
     ../../m1_csrc/m1_esp32_fw_update.c
     ../../m1_csrc/m1_esp32_hal.c
     ../../m1_csrc/m1_esp_hosted_dummy.c
+    ../../m1_csrc/m1_fault_report.c
+    ../../m1_csrc/m1_feedback_hw_adapter.c
+    ../../m1_csrc/m1_feedback_manager.c
+    ../../m1_csrc/m1_feedback_orchestration.c
+    ../../m1_csrc/m1_feedback_sequences.c
+    ../../m1_csrc/m1_feedback_task.c
     ../../m1_csrc/m1_file_browser.c
     ../../m1_csrc/m1_file_util.c
+    ../../m1_csrc/m1_save_filename.c
     ../../m1_csrc/m1_fusb302.c
     ../../m1_csrc/m1_fw_update.c
     ../../m1_csrc/m1_fw_update_bl.c
@@ -359,8 +521,10 @@ target_sources(m1_01 INTERFACE
     ../../m1_csrc/m1_i2c.c
     ../../m1_csrc/m1_infrared.c
     ../../m1_csrc/m1_int_hdl.c
+    ../../m1_csrc/m1_isr_drop_counters.c
     ../../m1_csrc/m1_lcd.c
     ../../m1_csrc/m1_led_indicator.c
+    ../../m1_csrc/m1_led_priority.c
     ../../m1_csrc/m1_lib.c
     ../../m1_csrc/m1_log_debug.c
     ../../m1_csrc/m1_low_power.c
@@ -368,22 +532,42 @@ target_sources(m1_01 INTERFACE
     ../../m1_csrc/m1_md5_hash.c
     ../../m1_csrc/m1_menu.c
     ../../m1_csrc/m1_nfc.c
+    ../../m1_csrc/m1_pcapng.c
+    ../../m1_csrc/m1_radiotap.c
+    ../../m1_csrc/m1_read_icon.c
     ../../m1_csrc/m1_power_ctl.c
     ../../m1_csrc/m1_rf_spi.c
     ../../m1_csrc/m1_rfid.c
     ../../m1_csrc/m1_ring_buffer.c
     ../../m1_csrc/m1_sdcard.c
     ../../m1_csrc/m1_sdcard_man.c
+    ../../m1_csrc/m1_sdcard_provision.c
     ../../m1_csrc/m1_settings.c
+    ../../m1_csrc/m1_sound.c
+    ../../m1_csrc/m1_sound_policy.c
     ../../m1_csrc/m1_storage.c
     ../../m1_csrc/m1_sub_ghz.c
+    ../../m1_csrc/m1_subghz_recordraw_draw.c
+    ../../m1_csrc/m1_subghz_scan_draw.c
     ../../m1_csrc/m1_sys_init.c
     ../../m1_csrc/m1_system.c
     ../../m1_csrc/m1_tasks.c
     ../../m1_csrc/m1_usb_cdc_msc.c
+    ../../m1_csrc/m1_heap_stack_report.c
+    ../../m1_csrc/m1_hid_keyboard.c
+    ../../m1_csrc/m1_manager_protocol.c
+    ../../m1_csrc/m1_manager_fs.c
+    ../../m1_csrc/m1_manager_fw.c
+    ../../m1_csrc/m1_manager_update_coordinator.c
+    ../../m1_csrc/m1_manager_fwupdate.c
+    ../../m1_csrc/m1_manager_espupdate.c
+    ../../m1_csrc/m1_esp_version.c
     ../../m1_csrc/m1_virtual_kb.c
     ../../m1_csrc/m1_watchdog.c
     ../../m1_csrc/m1_wifi.c
+    ../../m1_csrc/m1_esp_uart_transport.c
+    ../../m1_csrc/m1_wifi_session_cache.c
+    ../../m1_csrc/m1_wifi_client_id.c
     ../../m1_csrc/privateprofilestring.c
     ../../m1_csrc/uiView.c
 )
@@ -398,5 +582,3 @@ target_link_libraries(m1_01 INTERFACE
 if(CMAKE_C_STANDARD LESS 11)
     message(ERROR "Generated code requires C11 or higher")
 endif()
-
-

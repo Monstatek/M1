@@ -13,21 +13,13 @@ The applicable components, licenses, and original sources are listed below.
 
 ## 1. LF RFID Implementation (GPLv3)
 
-The LF RFID decoding and T5577 tag handling modules include structures and architectural
-concepts developed with reference to the Flipper Zero firmware project.
+The LF RFID decoding and T5577 tag handling modules are distributed under GPLv3.
 
 ### Related Files
 
-- lfrfid_protocol.c / lfrfid_protocol.h
-- lfrfid_protocol_em4100.c / lfrfid_protocol_em4100.h
-- lfrfid_protocol_h10301.c / lfrfid_protocol_h10301.h
-- t5577.c / t5577.h
-
-### Original Project
-
-https://github.com/flipperdevices/flipperzero-firmware
-
-Copyright (C) Flipper Devices Inc.
+The affected implementation is the `lfrfid/` module, including its protocol,
+hardware-adaptation, deterministic replay, and T5577 files. Individual source
+headers retain their original-project and modification notices.
 
 ### License
 
@@ -157,11 +149,10 @@ The ST-provided library components remain under their original license terms.
 
 ## License Copies
 
-Copies of applicable open source licenses are provided in the `LICENSES/` directory:
-
-- GPL-3.0
-- LGPL-3.0
-- MIT
+The repository-wide GPLv3 text is provided in `LICENSE` and `COPYING.txt`.
+Vendored libraries retain license files and notices in their own directories.
+Component-specific attribution and license identifiers are retained in the
+source headers and in this notice.
 
 ---
 
@@ -192,5 +183,4 @@ for GPL and LGPL covered portions is available within this repository.
 
 For questions regarding open source software usage:
 
-Monstatek  
-
+MonstaTek — minujaeger@monstatek.com

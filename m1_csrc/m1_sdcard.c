@@ -22,6 +22,8 @@
 #include "app_freertos.h"
 #include "cmsis_os.h"
 #include "m1_sdcard.h"
+#include "m1_sdcard_provision.h"
+#include "m1_storage.h"       /* usbmsc_sd_enable */
 
 /*************************** D E F I N E S ************************************/
 
@@ -79,9 +81,6 @@ uint8_t 			sdcard_status_changed = 0;
 
 static FATFS 		*sd_pfatfs; 		// Pointer to File system object for user logical drive
 static FRESULT 		sd_fres;  			// Return code for user
-static FILINFO 		sd_fno;	  			// Information structure
-static FIL 			sd_file;			// File object for user
-static DIR 			sd_dir;				// Directory object for user
 static uint32_t		sd_free_clusters;  	// Free Clusters
 static uint32_t		sd_free_sectors;	// Free Sectors
 static uint32_t		sd_total_sectors;  	// Total Sectors
@@ -102,10 +101,10 @@ FRESULT m1_sdcard_get_error_code(void);
 uint32_t m1_sdcard_get_total_capacity(void);
 uint32_t m1_sdcard_get_free_capacity(void);
 S_M1_SDCard_Access_Status m1_sdcard_get_status(void);
-void m1_sdcard_mount(void);
-void m1_sdcard_unmount(void);
+FRESULT m1_sdcard_mount(void);
+FRESULT m1_sdcard_unmount(void);
 uint8_t m1_sdcard_format(void);
-void m1_sdcard_set_status(S_M1_SDCard_Access_Status stat);
+static void m1_sdcard_set_status(S_M1_SDCard_Access_Status stat);
 static uint8_t m1_sdcard_getcardstate(void);
 static DSTATUS m1_sdcard_checkstatus(uint8_t param);
 static uint8_t m1_sdcard_checkstatus_ex(uint32_t timeout);
@@ -323,8 +322,7 @@ S_M1_SDCard_Init_Status m1_sdcard_init_ex(void)
 #else
 	if (osKernelGetState()==osKernelRunning )
 	{
-		m1_sdcard_mount();
-		if ( m1_sdcard_get_error_code()==FR_DISK_ERR )
+		if ( m1_sdcard_mount()==FR_DISK_ERR )
 			return SD_RET_ERROR_LOW_LEVEL;
 	} // if (osKernelGetState()==osKernelRunning )
 	else
@@ -660,15 +658,28 @@ S_M1_SDCard_Access_Status m1_sdcard_get_status(void)
 *
 */
 /******************************************************************************/
-void m1_sdcard_mount(void)
+FRESULT m1_sdcard_mount(void)
 {
 	// Mount a Logical Drive
 	sd_fres = f_mount(&sdcard_ctl.sdfs, sdcard_ctl.sdpath, 1);
+	const FRESULT mount_result = sd_fres;
 	if (sd_fres==FR_OK || sd_fres==FR_NO_FILESYSTEM)
 	{
 		sd_fres = f_getfree(sdcard_ctl.sdpath, &sd_free_clusters, &sd_pfatfs);
 		if(sd_fres==FR_OK)
+		{
 			sdcard_ctl.status = SD_access_OK;
+			/* Canonical SD folder structure: only now that mount succeeded,
+			 * firmware owns the filesystem, and (by construction -- this path
+			 * is unreachable while USB mass storage holds the card) the host
+			 * does not. Idempotent and non-blocking; a failure here never
+			 * fails this mount. Covers boot, card insertion/remount, and
+			 * USB-MSC-ownership return -- every real caller of this function. */
+			if (!usbmsc_sd_enable)
+			{
+				(void)m1_sdcard_provision_canonical();
+			}
+		}
 		else if(sd_fres==FR_NO_FILESYSTEM)
 			sdcard_ctl.status = SD_access_NoFS;
 		else
@@ -679,10 +690,13 @@ void m1_sdcard_mount(void)
 		f_mount(0, sdcard_ctl.sdpath, 0); // unmount
 		if ( sd_fres!=FR_DISK_ERR )
 			sdcard_ctl.status = SD_access_UnMounted;
+		else
+			sdcard_ctl.status = SD_access_NotOK;
 	} // else
 	sdcard_ctl.timestamp = HAL_GetTick();
 	M1_LOG_I(M1_LOGDB_TAG, "Mounting result: f_mount:%d %s\r\n", sd_fres, m1_sd_error_msg(sdcard_ctl.status));
-} // void m1_sdcard_mount(void)
+	return mount_result != FR_OK ? mount_result : sd_fres;
+} // FRESULT m1_sdcard_mount(void)
 
 
 
@@ -694,13 +708,14 @@ void m1_sdcard_mount(void)
 *
 */
 /******************************************************************************/
-void m1_sdcard_unmount(void)
+FRESULT m1_sdcard_unmount(void)
 {
 	// Unmount a Logical Drive
-    f_mount(0, sdcard_ctl.sdpath, 0);
-    sdcard_ctl.status = SD_access_UnMounted;
-	M1_LOG_I(M1_LOGDB_TAG, "Card unmounted.\r\n");
-} // void m1_sdcard_unmount(void)
+    sd_fres = f_mount(0, sdcard_ctl.sdpath, 0);
+    sdcard_ctl.status = sd_fres == FR_OK ? SD_access_UnMounted : SD_access_NotOK;
+    if (sd_fres == FR_OK) M1_LOG_I(M1_LOGDB_TAG, "Card unmounted.\r\n");
+    return sd_fres;
+} // FRESULT m1_sdcard_unmount(void)
 
 
 
@@ -711,11 +726,16 @@ void m1_sdcard_unmount(void)
 *
 */
 /******************************************************************************/
-void m1_sdcard_set_status(S_M1_SDCard_Access_Status stat)
+static void m1_sdcard_set_status(S_M1_SDCard_Access_Status stat)
 {
 	if ( stat < SD_access_EndOfStatus )
 		sdcard_ctl.status = stat;
 } // void m1_sdcard_set_status(S_M1_SDCard_Access_Status stat)
+
+void m1_sdcard_invalidate(void)
+{
+    m1_sdcard_set_status(SD_access_NotReady);
+}
 
 
 
@@ -918,7 +938,6 @@ void HAL_SD_RxCpltCallback(SD_HandleTypeDef *hsd)
 DSTATUS m1_sdcard_drive_init(uint8_t param)
 {
 	sd_stat = STA_NOINIT;
-
 	sd_stat = m1_sdcard_status(param);
 
     /*
@@ -1181,13 +1200,13 @@ void sdcard_detection_task(void *param)
 					if ( m1_sd_detected() )
 					{
 						if ( q_item.q_evt_type==Q_EVENT_SDCARD_INSERTED )
-							m1_led_set_blink_timer(LED_BLINK_ON_GREEN, LED_BLINK_TIMER_ONTIME, LED_BLINK_TIMER_MODE_BLINK);
+							m1_led_set_blink_timer(LED_BLINK_ON_GREEN, LED_BLINK_TIMER_ONTIME, LED_BLINK_TIMER_MODE_SOLID);
 						q_item.q_evt_type = Q_EVENT_SDCARD_CONNECTED;
 					} // if ( m1_sd_detected() )
 					else
 					{
 						if ( q_item.q_evt_type==Q_EVENT_SDCARD_INSERTED )
-							m1_led_set_blink_timer(LED_BLINK_ON_RED, LED_BLINK_TIMER_ONTIME, LED_BLINK_TIMER_MODE_BLINK);
+							m1_led_set_blink_timer(LED_BLINK_ON_RED, LED_BLINK_TIMER_ONTIME, LED_BLINK_TIMER_MODE_SOLID);
 						q_item.q_evt_type = Q_EVENT_SDCARD_DISCONNECTED;
 					}
 					xQueueSend(sdcard_det_q_hdl, &q_item, portMAX_DELAY);

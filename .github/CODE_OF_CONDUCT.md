@@ -1,5 +1,3 @@
-<!-- See COPYING.txt for license details. -->
-
 # Contributor Covenant Code of Conduct
 
 ## Our Pledge
@@ -61,9 +59,8 @@ representative at an online or offline event.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the community leaders responsible for enforcement by opening
-a [GitHub Issue](https://github.com/YOUR_ORG/m1_01/issues) (non-public) or
-contacting the project maintainers through the repository's security contact.
+reported to the community leaders responsible for enforcement at
+[minujaeger@monstatek.com](mailto:minujaeger@monstatek.com).
 All complaints will be reviewed and investigated promptly and fairly.
 
 All community leaders are obligated to respect the privacy and security of the
@@ -128,4 +125,4 @@ enforcement ladder](https://github.com/mozilla/diversity).
 
 For answers to common questions about this code of conduct, see the FAQ at
 https://www.contributor-covenant.org/faq. Translations are available at
-https://www.contributor-covenant.org/translations. 
+https://www.contributor-covenant.org/translations.

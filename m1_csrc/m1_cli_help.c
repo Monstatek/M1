@@ -97,6 +97,10 @@ void cmd_m1_mtest_help_basic_system(void)
 	M1_LOG_N(M1_LOGDB_TAG, "Syntax: mtest 4 ref(0-255)\r\n");
 	vTaskDelay(1); // Give the log task some time to do its job
 
+	M1_LOG_N(M1_LOGDB_TAG, "\r\n- cmd_type 5: heap and task stack telemetry\r\n");
+	M1_LOG_N(M1_LOGDB_TAG, "Syntax: mtest 5\r\n");
+	vTaskDelay(1); // Give the log task some time to do its job
+
 	M1_LOG_N(M1_LOGDB_TAG, "\r\n");
 
 } // void cmd_m1_mtest_help_basic_system(void)

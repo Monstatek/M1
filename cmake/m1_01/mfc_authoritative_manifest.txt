@@ -1,0 +1,91 @@
+# mfc_authoritative_manifest.txt
+#
+# Machine-checkable inventory of the ONE authoritative MIFARE Classic (MFC)
+# implementation. Consumed by cmake/m1_01/verify_mfc_arch.sh (POST_BUILD) and
+# by the host forbid-test. Maintained by hand; changing it is a deliberate
+# architectural act.
+#
+# Sections:
+#   REQUIRED_SYM  -- must be a defined text symbol in the linked ELF (the live
+#                    Flow-A RAWOWN/Crypto1/DMA/session/HAL backend).
+#   FORBIDDEN_SYM -- must NOT be a defined text symbol (obsolete generic-MFC or
+#                    the deleted duplicate Flow-B listener-frame crypto backend).
+#   FORBIDDEN_SRC -- a regex that must NOT match any active (non-comment) line
+#                    of the production source tree (obsolete routes/flows).
+#   FORBIDDEN_CMAKE -- a regex that must NOT match active CMake configuration
+#                    (a build option selecting an alternate/legacy MFC backend).
+#
+# Live emulate path (Flow A): nfc_driver.c -> m1_mfc_raw_hw_run (session_hw)
+#   -> m1_mfc_session take_auth/on_nrar/on_read -> ce_mfc + crypto1, TX via
+#   m1_mfc_dma_tx_frame, RAWOWN HAL direct. Live read: nfc_poller ReadCycle ->
+#   m1_mfc_read_card -> dictionary/key-source machinery.
+
+# ---- REQUIRED: authoritative Flow-A backend must stay linked ----
+REQUIRED_SYM m1_mfc_raw_hw_run
+REQUIRED_SYM m1_mfc_raw_begin
+REQUIRED_SYM m1_mfc_raw_end
+REQUIRED_SYM m1_mfc_raw_set_emu_image
+REQUIRED_SYM m1_mfc_raw_has_emu_image
+REQUIRED_SYM m1_mfc_raw_teardown_cleanup
+REQUIRED_SYM m1_mfc_raw_hw_active
+REQUIRED_SYM m1_mfc_raw_hw_session_end
+REQUIRED_SYM m1_mfc_authrx_isr
+REQUIRED_SYM m1_mfc_session_take_auth
+REQUIRED_SYM m1_mfc_session_on_nrar
+REQUIRED_SYM m1_mfc_session_on_read
+REQUIRED_SYM ce_mfc_auth1
+REQUIRED_SYM ce_mfc_auth2
+REQUIRED_SYM ce_mfc_build_read_resp
+REQUIRED_SYM crypto1_word
+REQUIRED_SYM crypto1_reader_answer
+REQUIRED_SYM m1_mfc_dma_init
+REQUIRED_SYM m1_mfc_dma_tx_frame
+REQUIRED_SYM m1_mfc_emu_image_build
+REQUIRED_SYM m1_nfc_raw_own_acquire
+
+# ---- FORBIDDEN: duplicate Flow-B listener-frame crypto backend (deleted) ----
+FORBIDDEN_SYM m1_mfc_raw_on_activated
+FORBIDDEN_SYM m1_mfc_raw_on_field_lost
+FORBIDDEN_SYM m1_mfc_raw_on_auth
+FORBIDDEN_SYM m1_mfc_raw_on_nrar
+FORBIDDEN_SYM m1_mfc_raw_on_nrar_bytes
+FORBIDDEN_SYM m1_mfc_raw_service_frame
+FORBIDDEN_SYM m1_mfc_raw_read_service
+FORBIDDEN_SYM m1_mfc_raw_is_authed
+FORBIDDEN_SYM m1_mfc_raw_reset_session
+FORBIDDEN_SYM m1_mfc_raw_dump_error
+FORBIDDEN_SYM m1_mfc_raw_diag_at
+FORBIDDEN_SYM m1_mfc_raw_at_cached
+FORBIDDEN_SYM m1_mfc_pauth_set
+FORBIDDEN_SYM m1_mfc_pauth_peek
+FORBIDDEN_SYM m1_mfc_pauth_dispatched
+FORBIDDEN_SYM m1_mfc_dma_tx_at
+
+# ---- FORBIDDEN source routes: generic Type-A MFC + duplicate-backend entry ----
+# Required fail-closed routing/lifecycle invariants. These protect the exact
+# regression where a start timeout was shown as success or Classic evidence
+# reached the generic NFC-A emitter.
+REQUIRED_SRC static bool nfc_context_is_mfc
+REQUIRED_SRC view_id = nfc_context_is_mfc\(c\)
+REQUIRED_SRC if \(nfc_context_is_mfc\(cc\)\)
+REQUIRED_SRC s_mfc_dedicated_refused = mfc_emu_start\(\)
+REQUIRED_SRC if \(m1_mfc_raw_hw_active\(\)\)
+REQUIRED_SRC return M1NFC_FAM_UNKNOWN
+FORBIDDEN_SRC s_mfc_dedicated_started
+
+# (patterns are matched against production .c/.h outside */test/*; a match --
+#  even inside a comment -- fails the build, which also forbids legacy docs.)
+# An identified MFC (CLASSIC) card mapped to the generic emulate view as the
+# ternary-TRUE branch (the deleted #else fallback / generic route). The correct
+# routing has VIEW_MODE_NFC_MFC_EMU as the TRUE branch, so this never matches it.
+FORBIDDEN_SRC M1NFC_FAM_CLASSIC[) ]*\?[ ]*VIEW_MODE_NFC_EMULATE
+# The deleted duplicate listener-frame crypto backend entry/handlers.
+FORBIDDEN_SRC m1_mfc_pauth_set
+FORBIDDEN_SRC m1_mfc_raw_service_frame
+FORBIDDEN_SRC m1_mfc_raw_on_auth
+FORBIDDEN_SRC m1_mfc_raw_read_service
+FORBIDDEN_SRC m1_mfc_dma_tx_at
+
+# ---- FORBIDDEN CMake: no option selecting an alternate/legacy MFC backend ----
+FORBIDDEN_CMAKE M1_MFC_BB_AT
+FORBIDDEN_CMAKE M1_MFC_RAW_EMULATION[[:space:]]+OFF

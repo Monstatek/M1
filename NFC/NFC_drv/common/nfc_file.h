@@ -34,6 +34,15 @@ bool nfc_profile_load(const S_M1_file_info *f, const char* ext);
 bool nfc_profile_save(const char *fp, PCNFC_RUN_CTX ctx);
 
 /**
+ * @brief Mark the NEXT nfc_profile_save() as a manually-created card.
+ *
+ * Writes a "# Created: manual" provenance comment into the saved file so a
+ * manually-added record is distinguishable from a physical full-card read. The
+ * flag is one-shot: it is consumed (cleared) by the next save.
+ */
+void nfc_file_mark_next_save_manual(void);
+
+/**
  * @brief Get filename from user and create full file path
  * 
  * Prompts user for filename using virtual keyboard, validates
@@ -41,12 +50,12 @@ bool nfc_profile_save(const char *fp, PCNFC_RUN_CTX ctx);
  * duplicate filenames.
  * 
  * @param filepath Output buffer for full file path (can be NULL)
+ * @param filepath_size Actual output capacity, including NUL
  * @return 0 on success
  * @return 1 Limited space available on SD card
- * @return 2 Error creating directory on SD card
+ * @return 2 Storage/path error or insufficient output capacity
  * @return 3 User escaped (cancelled)
  */
-uint8_t nfc_save_file_keyboard(char *filepath);
+uint8_t nfc_save_file_keyboard(char *filepath, size_t filepath_size);
 
 #endif /* NFC_DRV_NFC_FILE_H_ */
-

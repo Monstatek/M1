@@ -31,6 +31,7 @@
 #include "rfal_analogConfig.h"
 #include "rfal_iso15693_2.h"
 #include "rfal_crc.h"
+#include "legacy/nfc_listener.h"   /* test09 (diagnostic): Emu_GetPersona for MFC-DETECT raw-RXE marker */
 
 
 /*
@@ -3765,9 +3766,31 @@ static ReturnCode rfalRunListenModeWorker( void )
                 
                 irqs = st25r3916GetInterrupt( ( ST25R3916_IRQ_MASK_RXE | ST25R3916_IRQ_MASK_EOF) );
                 if( irqs == ST25R3916_IRQ_MASK_NONE )
-                {                        
+                {
                     break;  /* No interrupt to process */
                 }
+
+                /* test09 (diagnostic, MFC Detect Reader): latch + log the FIRST raw RXE
+                 * seen while the LM is in ACTIVE_A, REUSING the irqs value already read
+                 * just above -- no extra getter, no flag consumed, no control-flow change.
+                 * Reports a physical receive-completion independently of the CRC/parity/
+                 * length filtering below, separating "no post-SELECT frame arrives at all"
+                 * from "a frame arrives but is rejected before dataFlag". Latched once per
+                 * boot; a reflash/reboot re-arms it. */
+                if( (Emu_GetPersona() == EMU_PERSONA_MFC_DETECT)      &&
+                    (gRFAL.Lm.state   == RFAL_LM_STATE_ACTIVE_A)      &&
+                    ((irqs & ST25R3916_IRQ_MASK_RXE) != 0U) )
+                {
+                    static bool s_dbgRawRxeSeen = false;
+                    if( !s_dbgRawRxeSeen )
+                    {
+                        s_dbgRawRxeSeen = true;
+                        platformLog("[MFC-DR] raw RXE seen\r\n");
+                    }
+                }
+                /* MonstaTek Scope B: the MFC_EMU nonce reply is sent from the CE
+                 * WAIT_RX handler (nfc_listener.c) via rfalTransceiveBlockingTx --
+                 * the same FDT-compliant path T2T emulation uses -- not from here. */
 
                 /* If EOF has already been received processing of other events is neglectable */
                 if( (irqs & ST25R3916_IRQ_MASK_EOF) != 0U )

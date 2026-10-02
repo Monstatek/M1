@@ -19,15 +19,22 @@
 #include "m1_bq27421.h"
 #include "m1_i2c.h"
 #include "battery.h"
-#include "golden_image_0330.h"
+#include "golden_image_0420.h"
 #include "m1_power_ctl.h"
 #include "m1_log_debug.h"
+#include "m1_watchdog.h"
+#include "m1_bq27421_boot_guard.h"
 
 /*************************** D E F I N E S ************************************/
 
 #define M1_LOGDB_TAG	"BQ27421"
 
 #define BQ27241_I2C_TIMEOUT	(2000)
+/* 500 attempts * 10ms = 5000ms: a generous but FINITE window for the
+ * gauge's average-current reading to leave its dead zone after a golden-
+ * image update (real calibration settling, not indefinite). See
+ * m1_bq27421_boot_guard.h for why this must be bounded. */
+#define BQ27421_CURRENT_STABILIZE_MAX_ATTEMPTS	(500)
 
 // ==== BlockData offsets (Extended Data - "Gas Gauging" subclass ???? ????) ====
 #define OFFS_DESIGN_CAP_MSB      10
@@ -52,6 +59,7 @@ bool _sealFlag; // Global to identify that IC was previously sealed
 bool _userConfigControl; // Global to identify that user has control over
                          // entering/exiting config
 static uint8_t Blockdata[32];
+
 
 
 /********************* F U N C T I O N   P R O T O T Y P E S ******************/
@@ -118,22 +126,60 @@ bool bq27421_setHiberate(void);
 bool bq27421_clearHiberate(void);
 
 /*************** F U N C T I O N   I M P L E M E N T A T I O N ****************/
+bool bq27421_user_reset(void)
+{
+	bq27421_unseal();
+	HAL_Delay(10);
+	bq27421_softReset();
+	HAL_Delay(10);
+	bq27421_sealed();
+}
 
+/* Hardware-backed ops for bq27421_wait_for_itpor()/bq27421_wait_for_current_stable()
+ * (m1_bq27421_boot_guard.c) -- the real I2C/HAL calls the pure, host-tested
+ * control flow is parameterized over. */
+static void bq27421_guard_delay_ms(uint32_t ms) { HAL_Delay(ms); }
+static void bq27421_guard_wdt_kick(void) { m1_wdt_reset(); }
+static bool bq27421_guard_itpor_ready(void) { return bq27421_itporFlag(); }
+static int16_t bq27421_guard_read_current_mA(void)
+{
+    int16_t current_mA = 0;
+    /* A failed I2C read is treated as "not yet stable" -- the bounded loop
+     * simply retries within its own budget rather than misreading garbage
+     * or a stale value as a stability result. */
+    (void)bq27421_readAvgCurrent_mA(&current_mA);
+    return current_mA;
+}
+static const bq27421_boot_guard_ops_t s_bq27421_guard_ops = {
+    bq27421_guard_itpor_ready,
+    bq27421_guard_read_current_mA,
+    bq27421_guard_delay_ms,
+    bq27421_guard_wdt_kick,
+};
 
 /*============================================================================*/
 /**
-  * @brief
-  * @param
-  * @retval
+  * @brief  Initializes the BQ27421 fuel gauge, forcing a golden-image
+  *         reload if the design capacity or taper rate don't match this
+  *         product's expected configuration (factory/new-unit path).
+  * @param  None
+  * @retval true if the gauge is in a known-good state (no reload needed,
+  *         or reload completed and current stabilized); false if the
+  *         gauge could not be brought up within its bounded wait windows
+  *         (reset never confirmed, or post-update current never
+  *         stabilized) -- boot continues regardless, in a degraded
+  *         gauge state, rather than hanging.
   */
 /*============================================================================*/
 bool bq27421_init(void)
 {
-	uint8_t flags, designcap_valid, qmax_cell_valid;
-	uint16_t device_type, bat_design_cap, qmax_cell;
-	uint16_t timeout;
+	uint8_t flags; //designcap_valid, qmax_cell_valid;
+	uint16_t device_type, bat_design_cap, qmax_cell, taper_rate;
+	bool reset_confirmed;
+	bool need_update;
+	bool gauge_ok = true;   /* overall status for the return value; only the
+	                         * update path below can set this false */
 
-    // Unseal gauge
 	battery_access_disable();
 
 	//+ADD
@@ -155,40 +201,79 @@ bool bq27421_init(void)
 	// Read design capacity
 	// "most useful for system level debug to quickly determine device configuration"
     bq27421_readDesignCapacity_mAh(&bat_design_cap);
-    designcap_valid = (bat_design_cap==M1_BATT_DESIGN_CAPACITY); // Golden image loaded or not?
-    qmax_cell = bq27421_read_x_data(BQ27421_ID_STATE, BQ27421_STATE_OFFSET_QMAXCELL0);
-    qmax_cell_valid = (qmax_cell != M1_STATE_QMAX_CELL_DEFAULT);
+    //designcap_valid = (bat_design_cap==M1_BATT_DESIGN_CAPACITY); // Golden image loaded or not?
+    //qmax_cell = bq27421_read_x_data(BQ27421_ID_STATE, BQ27421_STATE_OFFSET_QMAXCELL0);
+    //qmax_cell_valid = (qmax_cell != M1_STATE_QMAX_CELL_DEFAULT);
 
-	timeout = BQ27241_I2C_TIMEOUT;
-    if ( (flags) || (!designcap_valid) || (!qmax_cell_valid) )
+    taper_rate = bq27421_read_x_data(BQ27421_ID_STATE, BQ27421_STATE_OFFSET_TAPER_RATE);
+
+    need_update = (bat_design_cap!=M1_BATT_DESIGN_CAPACITY)
+    		//|| (qmax_cell == M1_STATE_QMAX_CELL_DEFAULT)
+			|| (taper_rate != M1_STATE_TAPER_RATE);
+
+	reset_confirmed = flags ? true : false;   /* already reset -> nothing to wait for */
+    //if ( (flags) || (!designcap_valid) || (!qmax_cell_valid) )
+	if ( (flags) || (need_update) )
     {
     	if ( !flags ) // BQ27421 not reset?
     	{
         	bq27421_reset(); // Let reset it
         	HAL_Delay(100);
-        	while ( timeout-- )
+
+        	if ( bq27421_sealed() )
         	{
-    			if ( bq27421_itporFlag() )
-    				break;
-        	    HAL_Delay(1);
-        	} // while ( timeout-- )
+        		_sealFlag = true;
+        		bq27421_unseal(); // Must be unsealed before making changes
+        	}
+
+        	/* Bounded wait for the gauge's own ITPOR (reset-complete) flag.
+        	 * reset_confirmed is a plain bool -- no wraparound is possible,
+        	 * unlike the previous `while(timeout--)` uint16_t post-decrement,
+        	 * which wrapped a full timeout to 0xFFFF and made the subsequent
+        	 * `if(timeout)` read that as success. */
+        	reset_confirmed = bq27421_wait_for_itpor(&s_bq27421_guard_ops, BQ27241_I2C_TIMEOUT);
         	HAL_Delay(10);
+        	if (!reset_confirmed) {
+        		M1_LOG_I(M1_LOGDB_TAG, "Fuel gauge reset not confirmed within %u ms -- continuing boot degraded.\r\n",
+        		         (unsigned)BQ27241_I2C_TIMEOUT);
+        		gauge_ok = false;
+        	}
     	} // if ( !flags )
 
-    	if ( timeout )
+    	if ( reset_confirmed )
     	{
+    		bool current_stable;
+
     		M1_LOG_I(M1_LOGDB_TAG, "Fuel gauge golden image being loaded!\r\n");
     		u8g2_SetPowerSave(&m1_u8g2, false);
     		m1_image_message(battery_meter_46_36, 46, 36, "Battery gauge updating...");
     		lp5814_backlight_on(M1_BACKLIGHT_BRIGHTNESS); // Turn on backlight
     		m1_led_fw_update_on(NULL);
     		bq27421_golden_image_update();
+
+    		/* Bounded wait for the average-current reading to leave its dead
+    		 * zone -- the watchdog is only kicked WITHIN this fixed budget
+    		 * (BQ27421_CURRENT_STABILIZE_MAX_ATTEMPTS), never unconditionally.
+    		 * An unresponsive gauge here now falls through to a clearly
+    		 * logged degraded state and boot continues, instead of an
+    		 * unbounded loop that fed the watchdog forever and defeated the
+    		 * one failsafe that would otherwise have recovered the device. */
+    		current_stable = bq27421_wait_for_current_stable(&s_bq27421_guard_ops,
+    		                                                  BQ27421_CURRENT_STABILIZE_MAX_ATTEMPTS);
     		m1_led_fw_update_off();
-    	} // if ( timeout )
+    		if (!current_stable) {
+    			M1_LOG_I(M1_LOGDB_TAG, "Fuel gauge current did not stabilize within %u attempts -- continuing boot degraded.\r\n",
+    			         (unsigned)BQ27421_CURRENT_STABILIZE_MAX_ATTEMPTS);
+    			gauge_ok = false;
+    		}
+    	} // if ( reset_confirmed )
+    	else
+    	{
+    		gauge_ok = false;   /* reset never confirmed above -- golden image was not even attempted */
+    	}
     } // if ( (flags) || (!designcap_valid) || (!qmax_cell_valid) )
     else
     {
-    	timeout = 0;
     	//bq27421_updateDataMemoryBlockReadTest();
     }
 
@@ -201,7 +286,7 @@ bool bq27421_init(void)
     HAL_Delay(10);
 
     battery_access_enable();
-
+#if 0 //-2026_0508_01
     if ( timeout ) // Golden image has been flashed?
     {
 
@@ -218,8 +303,8 @@ bool bq27421_init(void)
 		//vTaskEndScheduler();
 		NVIC_SystemReset();
     } // if ( timeout )
-
-    return true;
+#endif
+    return gauge_ok;
 } // bool bq27421_init(void)
 
 

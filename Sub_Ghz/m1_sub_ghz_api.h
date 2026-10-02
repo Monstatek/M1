@@ -84,6 +84,21 @@ typedef enum
 } tRadioAntennaMode;
 
 void radio_init_rx_tx(S_M1_SubGHz_Band, uint8_t mod_type, bool do_reset);
+
+/* Exact-frequency tuning (Record RAW extended frequency list, Phase 14).
+ * radio_tune_exact_hz() programs the SI4463 synthesizer to an EXACT integer-Hz
+ * frequency by loading the correct base band configuration (outdiv/modem) and
+ * overriding FC_INTE/FC_FRAC. It does NOT silently substitute a nearby preset:
+ * a non-zero return is an explicit failure the caller must surface.
+ * NOTE: this validates the RECEIVE tuning path only. TX output power / RF
+ * matching and regional TX enablement are SEPARATE and remain factory-pending. */
+#define RADIO_TUNE_OK          0   /* exact frequency programmed                     */
+#define RADIO_TUNE_ERR_RANGE   1   /* Hz outside the SI4463 synthesizer coverage     */
+#define RADIO_TUNE_ERR_CALC    2   /* tuning calc rejected the value (FC not representable) */
+#define RADIO_TUNE_ERR_APPLY   3   /* radio would not accept the config (CTS/apply fault)   */
+bool    radio_freq_in_range(uint32_t hz);
+uint8_t radio_tune_exact_hz(uint32_t hz, uint8_t mod_type, bool do_reset);
+
 void radio_patch_reinit(void);
 uint8_t radio_get_init_state(void);
 void radio_set_antenna_mode(tRadioAntennaMode mode);

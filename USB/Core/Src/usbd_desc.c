@@ -17,6 +17,8 @@
   *
   ******************************************************************************
   */
+#pragma GCC push_options
+#pragma GCC optimize("O0")
 
 /* Includes ------------------------------------------------------------------*/
 #include "usbd_core.h"
@@ -26,7 +28,7 @@
 /* Private typedef -----------------------------------------------------------*/
 /* Private define ------------------------------------------------------------*/
 
-#if (M1_USB_MODE == M1_CFG_USB_CDC_MSC)
+#if (M1_USB_CONFIG == M1_CFG_USB_CDC_MSC)
 
 #define USBD_VID                      0x0483
 #define USBD_PID                      0x5750
@@ -48,7 +50,7 @@
 #define USBD_CONFIGURATION_FS_STRING  "MTEKM1_MSC_CDC FS Config"
 #define USBD_INTERFACE_FS_STRING      "MTEKM1_MSC_CDC FS"
 #endif // #if 0
-#elif (M1_USB_MODE == M1_CFG_USB_MSC)
+#elif (M1_USB_CONFIG == M1_CFG_USB_MSC)
 
 #define USBD_VID                      0x0483
 #define USBD_PID                      0x572A /* Replace '0xaaaa' with your device product ID */
@@ -61,7 +63,7 @@
 #define USBD_CONFIGURATION_FS_STRING  "MSC Config" /* Add your configuration Full Speed string */
 #define USBD_INTERFACE_FS_STRING      "MSC Interface" /* Add your Interface Full Speed string */
 
-#elif (M1_USB_MODE == M1_CFG_USB_CDC)
+#elif (M1_USB_CONFIG == M1_CFG_USB_CDC)
 
 #define USBD_VID                      0x0483
 #define USBD_PID                      0x5740 /* Replace '0xaaaa' with your device product ID */
@@ -129,15 +131,15 @@ __ALIGN_BEGIN uint8_t USBD_DeviceDesc[USB_LEN_DEV_DESC] __ALIGN_END =
   0x00,                       /* bcdUSB */
 #endif /* (USBD_LPM_ENABLED == 1) || (USBD_CLASS_BOS_ENABLED == 1) */
   0x02,
-#if M1_USB_MODE == M1_CFG_USB_CDC_MSC
+#if M1_USB_CONFIG == M1_CFG_USB_CDC_MSC
   0xEF,                       /* bDeviceClass Vendor Specific (Composite requires 0xEF or 0x00) */
   0x02,                       /* bDeviceSubClass */
   0x01,                       /* bDeviceProtocol */
-#elif M1_USB_MODE == M1_CFG_USB_MSC
+#elif M1_USB_CONFIG == M1_CFG_USB_MSC
   0x00,                       /* bDeviceClass */
   0x00,                       /* bDeviceSubClass */
   0x00,                       /* bDeviceProtocol */
-#elif M1_USB_MODE == M1_CFG_USB_CDC
+#elif M1_USB_CONFIG == M1_CFG_USB_CDC
   0x02,                       /* bDeviceClass */
   0x02,                       /* bDeviceSubClass */
   0x00,                       /* bDeviceProtocol */
@@ -503,3 +505,5 @@ static void IntToUnicode(uint32_t value, uint8_t *pbuf, uint8_t len)
     pbuf[2U * idx + 1] = 0U;
   }
 }
+
+#pragma GCC push_options

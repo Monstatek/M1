@@ -18,6 +18,7 @@
 #include "stm32h5xx_hal.h"
 #include "main.h"
 #include "m1_gpio.h"
+#include "m1_esp32_hal.h"
 
 /*************************** D E F I N E S ************************************/
 
@@ -28,7 +29,6 @@
 #define THIS_LCD_MENU_TEXT_ROW_SPACE			10
 
 //************************** C O N S T A N T **********************************/
-
 const char *m1_ext_gpio_label[M1_EXT_GPIO_LIST_N] = {	"Power 3.3V",
 														"Power 5.0V",
 														"",
@@ -38,8 +38,10 @@ const char *m1_ext_gpio_label[M1_EXT_GPIO_LIST_N] = {	"Power 3.3V",
 														"Pin PE6",
 														"Pin PD12",
 														"Pin PD13",
+#ifndef DEBUG_SWLINK_USED
 														"Pin PA14",
 														"Pin PA13",
+#endif
 														/*"Pin PA9",*/
 														/*"Pin PA10",*/
 														"Pin PC2",
@@ -61,8 +63,10 @@ S_GPIO_IO_t m1_ext_gpio[M1_EXT_GPIO_LIST_N] = {	{.gpio_port = EN_EXT_3V3_GPIO_Po
 												{.gpio_port = PE2_GPIO_Port, .gpio_pin = PE6_Pin},
 												{.gpio_port = PD12_GPIO_Port, .gpio_pin = PD12_Pin},
 												{.gpio_port = PD13_GPIO_Port, .gpio_pin = PD13_Pin},
+#ifndef DEBUG_SWLINK_USED
 												{.gpio_port = SWCLK_GPIO_Port, .gpio_pin = SWCLK_Pin},
 												{.gpio_port = SWDIO_GPIO_Port, .gpio_pin = SWDIO_Pin},
+#endif
 												/*{.gpio_port = UART_1_TX_GPIO_Port, .gpio_pin = UART_1_TX_Pin},*/
 												/*{.gpio_port = UART_1_RX_GPIO_Port, .gpio_pin = UART_1_RX_Pin},*/
 												{.gpio_port = PC2_GPIO_Port, .gpio_pin = PC2_Pin},
@@ -73,6 +77,19 @@ S_GPIO_IO_t m1_ext_gpio[M1_EXT_GPIO_LIST_N] = {	{.gpio_port = EN_EXT_3V3_GPIO_Po
 
 static uint8_t m1_ext_gpio_stat[M1_EXT_GPIO_LIST_N] = {0};
 static uint8_t m1_ext_gpio_id = M1_EXT_GPIO_FIRST_ID; // Default to the first ext. GPIO [PE2_GPIO_Port, PE2_Pin]
+
+typedef enum en_m1_usbbridge_mode
+{
+    MNU_USBBRIDGE_UART1 = 0,
+    MNU_USBBRIDGE_ESP32RUN,
+} en_M1_USBBRIDGE;
+
+#define MAX_MENU_USBBRIDGE  MNU_USBBRIDGE_ESP32RUN
+
+static en_M1_USBBRIDGE menuid_usbbridge = MNU_USBBRIDGE_UART1;
+
+
+uint8_t DEBUG_esp32_reset_pin = 0;
 
 /********************* F U N C T I O N   P R O T O T Y P E S ******************/
 
@@ -116,6 +133,9 @@ void menu_gpio_init(void)
     }
 
     m1_ext_gpio_id = M1_EXT_GPIO_FIRST_ID; // Default to the first ext. GPIO [PE2_GPIO_Port, PE2_Pin]
+
+
+    osDelay(20); DEBUG_esp32_reset_pin = HAL_GPIO_ReadPin(ESP32_EN_GPIO_Port, ESP32_EN_Pin);
 } // void menu_gpio_init(void)
 
 
@@ -139,6 +159,7 @@ void menu_gpio_exit(void)
     	HAL_GPIO_Init(m1_ext_gpio[i].gpio_port, &GPIO_InitStruct);
     }
 
+#ifndef DEBUG_SWLINK_USE
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Alternate = GPIO_AF0_SWJ;
     GPIO_InitStruct.Pull = GPIO_PULLDOWN; // Pulldown for SWCLK
@@ -147,11 +168,16 @@ void menu_gpio_exit(void)
     GPIO_InitStruct.Pull = GPIO_PULLUP; // Pullup for SWDIO
     GPIO_InitStruct.Pin = SWDIO_Pin;
     HAL_GPIO_Init(SWDIO_GPIO_Port, &GPIO_InitStruct); // SWDIO
+#endif
 
     for(i=0; i<M1_EXT_GPIO_FIRST_ID; i++) // Reset power control pins
     {
     	HAL_GPIO_WritePin(m1_ext_gpio[i].gpio_port, m1_ext_gpio[i].gpio_pin, GPIO_PIN_RESET);
     }
+
+    HAL_GPIO_WritePin(ESP32_EN_GPIO_Port, ESP32_EN_Pin, GPIO_PIN_RESET);    // esp32 Reset
+
+    osDelay(20); DEBUG_esp32_reset_pin = HAL_GPIO_ReadPin(ESP32_EN_GPIO_Port, ESP32_EN_Pin);
 } // void menu_gpio_exit(void)
 
 
@@ -243,61 +269,146 @@ void gpio_5v_on_gpio(void)
 
 
 
+extern volatile int esp32_reset_en;
+
 /*============================================================================*/
 /**
-  * @brief
+  * @brief Connect UART to PC using USB CDC
   * @param
   * @retval
   */
 /*============================================================================*/
 void gpio_usb_uart_bridge(void)
 {
-	S_M1_Buttons_Status this_button_status;
-	S_M1_Main_Q_t q_item;
-	BaseType_t ret;
+	GPIO_InitTypeDef GPIO_InitStruct = {0};
+    S_M1_Buttons_Status this_button_status;
+    S_M1_Main_Q_t q_item;
+    BaseType_t ret;
 
-	m1_gui_let_update_fw();
+    enCdcMode prev_usbcdc_mode;
 
-	while (1 ) // Main loop of this task
-	{
-		;
-		; // Do other parts of this task here
-		;
+    /* Graphic work starts here */
+    u8g2_SetFont(&m1_u8g2, M1_DISP_MAIN_MENU_FONT_N);
 
-		// Wait for the notification from button_event_handler_task to subfunc_handler_task.
-		// This task is the sub-task of subfunc_handler_task.
-		// The notification is given in the form of an item in the main queue.
-		// So let read the main queue.
-		ret = xQueueReceive(main_q_hdl, &q_item, portMAX_DELAY);
-		if (ret==pdTRUE)
-		{
-			if ( q_item.q_evt_type==Q_EVENT_KEYPAD )
-			{
-				// Notification is only sent to this task when there's any button activity,
-				// so it doesn't need to wait when reading the event from the queue
-				ret = xQueueReceive(button_events_q_hdl, &this_button_status, 0);
-				if ( this_button_status.event[BUTTON_BACK_KP_ID]==BUTTON_EVENT_CLICK ) // user wants to exit?
-				{
-					; // Do extra tasks here if needed
+    // backup usbcdc_mode
+    prev_usbcdc_mode = m1_usbcdc_mode;
+    m1_logdb_deinit();
 
-					xQueueReset(main_q_hdl); // Reset main q before return
-					break; // Exit and return to the calling task (subfunc_handler_task)
-				} // if ( m1_buttons_status[BUTTON_BACK_KP_ID]==BUTTON_EVENT_CLICK )
-				else
-				{
-					; // Do other things for this task, if needed
-				}
-			} // if ( q_item.q_evt_type==Q_EVENT_KEYPAD )
-			else
-			{
-				; // Do other things for this task
-			}
-		} // if (ret==pdTRUE)
-	} // while (1 ) // Main loop of this task
+    if (menuid_usbbridge == MNU_USBBRIDGE_UART1)
+    {
+        m1_usbcdc_mode = CDC_MODE_VCP;
+    }
+    else if (menuid_usbbridge == MNU_USBBRIDGE_ESP32RUN)
+    {
+        m1_usbcdc_mode = CDC_MODE_ESP32;
+    }
 
-} // void gpio_usb_uart_bridge(void)
+    m1_logdb_init();
+    m1_usbcdc_drop_bridge_tx = 0U;
+    esp32_reset_en = 0;
 
+    if (menuid_usbbridge == MNU_USBBRIDGE_ESP32RUN)
+    {
+        HAL_GPIO_WritePin(ESP32_EN_GPIO_Port, ESP32_EN_Pin, GPIO_PIN_RESET);  // esp32 Reset pin
 
+        osDelay(20); DEBUG_esp32_reset_pin = HAL_GPIO_ReadPin(ESP32_EN_GPIO_Port, ESP32_EN_Pin);
+		//osDelay(20);
+		HAL_GPIO_WritePin(ESP32_EN_GPIO_Port, ESP32_EN_Pin, GPIO_PIN_SET);    // release esp32 Reset pin
+
+		osDelay(20); DEBUG_esp32_reset_pin = HAL_GPIO_ReadPin(ESP32_EN_GPIO_Port, ESP32_EN_Pin);
+
+		m1_hard_delay(5);
+    }
+
+    m1_u8g2_firstpage();
+    u8g2_DrawStr(&m1_u8g2, 6, 15, "Initializing...");
+    u8g2_DrawXBMP(&m1_u8g2, M1_LCD_DISPLAY_WIDTH/2 - 18/2, M1_LCD_DISPLAY_HEIGHT/2 - 2, 18, 32, hourglass_18x32);
+    m1_u8g2_nextpage();
+
+    m1_u8g2_firstpage();
+
+    u8g2_DrawStr(&m1_u8g2, 6, 15, "Connect USB to PC...");
+    u8g2_DrawXBMP(&m1_u8g2, M1_LCD_DISPLAY_WIDTH/2 - 18/2, M1_LCD_DISPLAY_HEIGHT/2 - 2, 18, 32, hourglass_18x32);
+    m1_u8g2_nextpage();
+
+    while (1 ) // Main loop of this task
+    {
+        ret = xQueueReceive(main_q_hdl, &q_item, portMAX_DELAY);
+        if (ret==pdTRUE)
+        {
+            if ( q_item.q_evt_type==Q_EVENT_KEYPAD )
+            {
+                // Notification is only sent to this task when there's any button activity,
+                // so it doesn't need to wait when reading the event from the queue
+                ret = xQueueReceive(button_events_q_hdl, &this_button_status, 0);
+                if ( this_button_status.event[BUTTON_BACK_KP_ID]==BUTTON_EVENT_CLICK ) // user wants to exit?
+                {
+                    ; // Do extra tasks here if needed
+                    xQueueReset(main_q_hdl); // Reset main q before return
+
+                    // Drop any already-queued bridge payload from this point.
+                    m1_usbcdc_drop_bridge_tx = 1U;
+
+                    if (menuid_usbbridge == MNU_USBBRIDGE_ESP32RUN)
+                    {
+                        // Stop ESP32 output source first to avoid residual bridge data.
+                        HAL_GPIO_WritePin(ESP32_EN_GPIO_Port, ESP32_EN_Pin, GPIO_PIN_RESET);
+
+                        osDelay(20); DEBUG_esp32_reset_pin = HAL_GPIO_ReadPin(ESP32_EN_GPIO_Port, ESP32_EN_Pin);
+
+                        // Keep ESP32 SW init flags synchronized with HW power state.
+                        // If EN is forced low here but init_done remains true,
+                        // later wifi_scan_ap() can skip re-init and fail scan.
+                        m1_esp32_deinit();
+                    }
+
+                    // Drop any remaining bridge data captured right before exit.
+                    if (h_uart_rx_streambuf != NULL)
+                    {
+                        xStreamBufferReset(h_uart_rx_streambuf);
+                    }
+                    if (h_usb_rx_streambuf != NULL)
+                    {
+                        xStreamBufferReset(h_usb_rx_streambuf);
+                    }
+
+                    m1_logdb_deinit();
+
+                    // recover usbcdc_mode
+                    m1_usbcdc_mode = prev_usbcdc_mode;
+                    m1_logdb_init();
+                    m1_usbcdc_drop_bridge_tx = 0U;
+
+                    if (m1_usbcdc_mode != CDC_MODE_LOG_CLI)
+                    {
+                        m1_usb_cdc_force_reconnect();
+                    }
+
+                    if (m1_usbcdc_mode == CDC_MODE_LOG_CLI)
+                    {
+                        // Send prompt after waiting for USB endpoint stabilization
+                        osDelay(20);
+
+                        static uint8_t cli_restore_prompt[] = "\r\ncli> ";
+
+                        cdc_tx_owner_mode = CDC_MODE_LOG_CLI;
+                        (void)CDC_Transmit_FS(cli_restore_prompt, (uint16_t)(sizeof(cli_restore_prompt) - 1U));
+                        printf("\r\ncli> ");
+                        fflush(stdout);
+                    }
+
+                    M1_LOG_D(M1_LOGDB_TAG, "gpio_usb_uart_bridge exit: usbcdc_mode=%d", (int)m1_usbcdc_mode);
+
+                    break; // Exit and return to the calling task (subfunc_handler_task)
+                } // if ( m1_buttons_status[BUTTON_BACK_KP_ID]==BUTTON_EVENT_CLICK )
+            } // if ( q_item.q_evt_type==Q_EVENT_KEYPAD )
+            else
+            {
+                ; // Do other things for this task
+            }
+        } // if (ret==pdTRUE)
+    } // while (1 ) // Main loop of this task
+}
 
 /******************************************************************************/
 /**
@@ -357,7 +468,7 @@ void gpio_gui_update(const S_M1_Menu_t *phmenu, uint8_t sel_item)
     			u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_BG); // set to background color
     			u8g2_SetFont(&m1_u8g2, M1_DISP_SUB_MENU_FONT_B);
     			u8g2_DrawStr(&m1_u8g2, 4, menu_text_y, phmenu->submenu[i]->title);
-    			if ( i==0 ) // Index of GPIO Control
+    			if (( i==0 ) || ( i==3 )) // Index of "GPIO Control" or "USB-UART Bridge"
     			{
     		    	// Draw arrows left and right
     		    	u8g2_DrawXBMP(&m1_u8g2, M1_LCD_DISPLAY_WIDTH - 40, menu_text_y - THIS_LCD_MENU_TEXT_ROW_SPACE + 2, 10, 10, arrowleft_10x10);
@@ -393,9 +504,22 @@ void gpio_gui_update(const S_M1_Menu_t *phmenu, uint8_t sel_item)
     	    	m1_info_box_display_draw(INFO_BOX_ROW_1, prn_name);
     			break;
 
-    		case 3:
-    	    	m1_info_box_display_draw(INFO_BOX_ROW_1, "Please update firmware!");
-    			break;
+            case 3: // USB-UART Bridge
+            	if (menuid_usbbridge == MNU_USBBRIDGE_UART1)
+                {
+                    sprintf(prn_name,"UART:TX(PA9) RX(PA10) 3.3V");
+                }
+            	else if (menuid_usbbridge == MNU_USBBRIDGE_ESP32RUN)
+            	{
+                    sprintf(prn_name,"UART:ESP32");
+                }
+                else
+                {
+                    sprintf(prn_name,"UART:ESP32 FW Update");
+                }
+    	        m1_info_box_display_draw(INFO_BOX_ROW_1, prn_name);
+
+    	        break;
 
     		default: // Unknown selection
     			break;
@@ -417,31 +541,71 @@ void gpio_xkey_handler(S_M1_Key_Event event, uint8_t button_id, uint8_t sel_item
 {
 	uint8_t prn_name[GUI_DISP_LINE_LEN_MAX + 1] = {0};
 
-	if ( sel_item != 0) // Not the index of GPIO Control
-		return;
+    if ( event==BUTTON_EVENT_CLICK )
+    {
+        if ( sel_item == 0) {
+	        if ( button_id==BUTTON_LEFT_KP_ID ) // Left arrow key
+	        {
+	            m1_ext_gpio_id--;
+	            if ( m1_ext_gpio_id < M1_EXT_GPIO_FIRST_ID )
+	                m1_ext_gpio_id = M1_EXT_GPIO_LIST_N - 1;
+	        } // if ( button_id==BUTTON_LEFT_KP_ID )
+	        else if ( button_id==BUTTON_RIGHT_KP_ID ) // Right arrow key
+	        {
+	            m1_ext_gpio_id++;
+	            if ( m1_ext_gpio_id >= M1_EXT_GPIO_LIST_N )
+	                m1_ext_gpio_id = M1_EXT_GPIO_FIRST_ID;
+	        }
 
-	if ( event==BUTTON_EVENT_CLICK )
-	{
-		if ( button_id==BUTTON_LEFT_KP_ID ) // Left arrow key
-		{
-			m1_ext_gpio_id--;
-			if ( m1_ext_gpio_id < M1_EXT_GPIO_FIRST_ID )
-				m1_ext_gpio_id = M1_EXT_GPIO_LIST_N - 1;
-		} // if ( button_id==BUTTON_LEFT_KP_ID )
-		else if ( button_id==BUTTON_RIGHT_KP_ID ) // Right arrow key
-		{
-			m1_ext_gpio_id++;
-			if ( m1_ext_gpio_id >= M1_EXT_GPIO_LIST_N )
-				m1_ext_gpio_id = M1_EXT_GPIO_FIRST_ID;
-		}
+	        sprintf(prn_name, "%s: %s", m1_ext_gpio_label[m1_ext_gpio_id], (m1_ext_gpio_stat[m1_ext_gpio_id]==1)?"ON":"OFF");
+	        u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_BG); // set to background color
+	        // Clear old content
+	        m1_info_box_display_clear();
+	        u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_TXT); // set to text color
+	        m1_info_box_display_draw(INFO_BOX_ROW_1, prn_name);
 
-		sprintf(prn_name, "%s: %s", m1_ext_gpio_label[m1_ext_gpio_id], (m1_ext_gpio_stat[m1_ext_gpio_id]==1)?"ON":"OFF");
-    	u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_BG); // set to background color
-    	// Clear old content
-    	m1_info_box_display_clear();
-    	u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_TXT); // set to text color
-		m1_info_box_display_draw(INFO_BOX_ROW_1, prn_name);
+	        m1_u8g2_nextpage(); // Update LCD display RAM
+	    }
+        else  if ( sel_item == 3) {
+            if ( button_id==BUTTON_LEFT_KP_ID ) // Left arrow key
+            {
+                menuid_usbbridge--;
+                if ( menuid_usbbridge < 0 )
+                    menuid_usbbridge = MAX_MENU_USBBRIDGE;
+            } // if ( button_id==BUTTON_LEFT_KP_ID )
+            else if ( button_id==BUTTON_RIGHT_KP_ID ) // Right arrow key
+            {
+                menuid_usbbridge++;
+                if ( menuid_usbbridge > MAX_MENU_USBBRIDGE ){
+                    menuid_usbbridge = 0;
+                }
+            }
 
-		m1_u8g2_nextpage(); // Update LCD display RAM
+            if (menuid_usbbridge == MNU_USBBRIDGE_UART1)
+            {
+                sprintf(prn_name,"UART:TX(PA9) RX(PA10) 3.3V");
+            }
+            else if (menuid_usbbridge == MNU_USBBRIDGE_ESP32RUN)
+            {
+                sprintf(prn_name,"UART:ESP32");
+            }
+            else
+            {
+                sprintf(prn_name,"UART:ESP32 FW Update");
+            }
+
+            m1_info_box_display_draw(INFO_BOX_ROW_1, prn_name);
+            u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_BG); // set to background color
+
+            // Clear old content
+            m1_info_box_display_clear();
+            u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_TXT); // set to text color
+            m1_info_box_display_draw(INFO_BOX_ROW_1, prn_name);
+
+            m1_u8g2_nextpage(); // Update LCD display RAM
+        }
 	} // if ( event==BUTTON_EVENT_CLICK )
+
+
+
 } // void gpio_xkey_handler(S_M1_Key_Event event, uint8_t button_id, uint8_t)

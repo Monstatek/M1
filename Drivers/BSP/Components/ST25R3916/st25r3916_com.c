@@ -163,8 +163,20 @@ static void st25r3916comTxByte( uint8_t txByte, bool last, bool txOnly );
  * LOCAL FUNCTION
  ******************************************************************************
  */
+#if defined(M1_MFC_RAW_EMULATION)
+/* Transparent-mode audit: g_m1_tm_active is set by the {At} transmitter after
+ * CMD_TRANSPARENT_MODE (0xDC) and cleared before UNMASK (0xD1). Any ST25 SPI
+ * transaction in that window (which would cancel transparent mode) is counted
+ * here so the emulator can assert post_dc_spi == 0. */
+extern volatile uint8_t  g_m1_tm_active;
+extern volatile uint32_t g_m1_post_dc_spi;
+#endif
+
 static void st25r3916comStart( void )
 {
+#if defined(M1_MFC_RAW_EMULATION)
+    if (g_m1_tm_active != 0U) { g_m1_post_dc_spi++; }
+#endif
     /* Make this operation atomic, disabling ST25R3916 interrupt during communications*/
     platformProtectST25RComm();
     

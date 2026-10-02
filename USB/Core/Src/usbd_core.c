@@ -15,6 +15,8 @@
   *
   ******************************************************************************
   */
+#pragma GCC push_options
+#pragma GCC optimize("O0")
 
 /* Includes ------------------------------------------------------------------*/
 #include "usbd_core.h"
@@ -120,6 +122,10 @@ USBD_StatusTypeDef USBD_Init(USBD_HandleTypeDef *pdev,
   /* Unlink previous class*/
   pdev->pClass[0] = NULL;
   pdev->pUserData[0] = NULL;
+
+  /* Keep class bookkeeping deterministic in non-composite mode. */
+  pdev->NumClasses = 0U;
+  pdev->classId = 0U;
 #endif /* USE_USBD_COMPOSITE */
 
   pdev->pConfDesc = NULL;
@@ -1200,3 +1206,4 @@ USBD_DescHeaderTypeDef *USBD_GetNextDesc(uint8_t *pbuf, uint16_t *ptr)
   * @}
   */
 
+#pragma GCC push_options

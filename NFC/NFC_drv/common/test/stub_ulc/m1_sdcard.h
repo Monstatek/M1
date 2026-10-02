@@ -1,0 +1,3 @@
+#ifndef TEST_STUB_M1_SDCARD_H
+#define TEST_STUB_M1_SDCARD_H
+#endif

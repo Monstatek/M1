@@ -470,7 +470,9 @@ void m1_sdm_task_stop(void)
 /*============================================================================*/
 static uint8_t m1_sdm_close_datfile(void)
 {
-	return f_close(m1_pdatfile_hdl);
+	uint8_t r = f_close(m1_pdatfile_hdl);
+	M1_LOG_I(M1_LOGDB_TAG, "SDM: f_close=%d\r\n", r);
+	return r;
 } // static uint8_t m1_sdm_close_datfile(void)
 
 
@@ -485,7 +487,9 @@ static uint8_t m1_sdm_close_datfile(void)
 /*============================================================================*/
 static uint8_t m1_sdm_sync_datfile(void)
 {
-	return f_sync(m1_pdatfile_hdl);
+	uint8_t r = f_sync(m1_pdatfile_hdl);
+	M1_LOG_I(M1_LOGDB_TAG, "SDM: f_sync=%d\r\n", r);
+	return r;
 } // static uint8_t m1_sdm_sync_datfile(void)
 
 
@@ -522,7 +526,19 @@ uint32_t m1_sdm_getlastfilenumber(char *dirname, char *prefix)
 	char *filename;
 
 	filename = malloc(strlen(prefix) + 6);
-	assert(filename!=NULL);
+	/* assert() compiles out under NDEBUG (this project's actual ARM release
+	 * build passes -DNDEBUG -- confirmed via compile_commands.json), so it
+	 * was never a real safety net here; a failed allocation would fall
+	 * through to sprintf() on a NULL pointer. This is reachable on every
+	 * new SD-card data file created (not boot-time), so treat it as a
+	 * recoverable failure: report file_n = 0, exactly the value already
+	 * used when the scan below simply finds no matching files. The caller
+	 * (m1_sdm_file_init()) already re-checks existence in its own retry
+	 * loop before using whatever number this returns, so a false "0" here
+	 * cannot cause it to silently reuse/overwrite an existing file -- it
+	 * just costs a few extra existence-check iterations. */
+	if (filename == NULL)
+		return 0;
 	sprintf(filename, "%s*", prefix); // * = wildcard
 	file_n = 0;
 	fr = f_findfirst(&dir, &fno, dirname, filename);  /* Start to search for matching files */
@@ -538,6 +554,10 @@ uint32_t m1_sdm_getlastfilenumber(char *dirname, char *prefix)
 
 	f_closedir(&dir);
 
+	free(filename); /* was never released -- every call (once per new SD-card
+	                 * data file created, e.g. m1_sdm_file_init() below) leaked
+	                 * strlen(prefix)+6 bytes. */
+
 	return file_n;
 } // uint32_t m1_sdm_getlastfilenumber(char *dirname, char *prefix)
 
@@ -545,7 +565,7 @@ uint32_t m1_sdm_getlastfilenumber(char *dirname, char *prefix)
 
 /*============================================================================*/
 /**
-  * @brief  Open file to store raw data and a JSON file with the device configuration
+  * @brief  Open file to store raw data
   * @param  None
   * @retval 1 for f_write error, 2 for mem init error, else 0
   */

@@ -22,6 +22,7 @@
 #include "slip.h"
 #include <string.h>
 #include <assert.h>
+#include "m1_esp32_perf.h" /* MonstaTek: measured (not assumed) write-attempt counters -- see that header */
 
 #define SHORT_TIMEOUT 100
 #define DEFAULT_TIMEOUT 1000
@@ -391,6 +392,12 @@ esp_loader_error_t esp_loader_flash_write(void *payload, uint32_t size)
         loader_port_start_timer(DEFAULT_TIMEOUT);
         result = loader_flash_data_cmd(data, s_flash_write_size);
         attempt++;
+        /* MonstaTek: measured (not assumed) per-attempt outcome -- every
+         * other caller of this function only ever sees the FINAL result
+         * after up to SERIAL_FLASHER_WRITE_BLOCK_RETRIES attempts; this is
+         * the one place that can see each individual one. See
+         * m1_esp32_perf.h. */
+        m1_esp32_perf_note_write_attempt(result == ESP_LOADER_ERROR_TIMEOUT ? 1 : 0);
     } while (result != ESP_LOADER_SUCCESS && attempt < SERIAL_FLASHER_WRITE_BLOCK_RETRIES);
 
     return result;

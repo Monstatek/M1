@@ -19,12 +19,12 @@
 #include "m1_io_defs.h"
 #include "m1_compile_cfg.h"
 #include "m1_display.h"
+#include "m1_read_icon.h"
 
 /*************************** D E F I N E S ************************************/
 
 #define M1_LOGDB_TAG	"Display"
 
-#define MENU_M1_LOGO_ARRAY_LEN 		1
 #define MENU_M1_SCR_ANI_TIMEOUT		1000 // animation timeout in millisecond
 
 #define MENU_SCROLLBAR_POS_X				124
@@ -51,6 +51,17 @@
 
 #define MAIN_MENU_LOGO_FONT					M1_MAIN_LOGO_FONT_1B
 
+/* Approved full-width main-menu presentation (main-menu drawing path only;
+ * submenu rendering and the shared scrollbar constants are left unchanged). */
+#define MAIN_MENU2_ROW_H					16
+#define MAIN_MENU2_ICON_LEFT_POS_X			4
+#define MAIN_MENU2_TXT_LEFT_POS_X			22
+#define MAIN_MENU2_TXT_BASELINE_OFFSET		12
+#define MAIN_MENU2_SEL_BAND_LEFT_POS_X		0
+#define MAIN_MENU2_SEL_BAND_W				125
+#define MAIN_MENU2_POSIND_POS_X				126
+#define MAIN_MENU2_POSIND_W					2
+
 #define SUB_MENU_TEXT_ITEMS					4 // rows
 #define SUB_MENU_TEXT_FRAME_TOP_POS_Y		0
 #define SUB_MENU_TXT_LEFT_POS_X				4
@@ -69,12 +80,6 @@ const S_M1_menu_icon_data menu_fb_icon_text = {fb_m1_icon_file, 10, 8};
 const S_M1_menu_icon_data menu_fb_icon_data = {fb_m1_icon_file, 10, 8};
 const S_M1_menu_icon_data menu_fb_icon_other = {fb_m1_icon_file, 10, 8};
 
-const uint8_t *menu_m1_logo_array[MENU_M1_LOGO_ARRAY_LEN] = {
-	menu_m1_icon_M1_logo_1,
-//	menu_m1_icon_M1_logo_2,
-//	menu_m1_icon_M1_logo_3,
-//	menu_m1_icon_M1_logo_4
-};
 
 static const uint8_t menu_window_sizes[] = {MAIN_MENU_TEXT_ITEMS, SUB_MENU_TEXT_ITEMS};
 static const uint8_t menu_text_frame_top_pos_y[] = {MAIN_MENU_TEXT_FRAME_TOP_POS_Y, SUB_MENU_TEXT_FRAME_TOP_POS_Y};
@@ -128,8 +133,8 @@ void m1_draw_text(u8g2_t *u8g2,
                  S_M1_text_align_t align);
 void m1_draw_text_box(u8g2_t *u8g2,
                     int x, int y,
-                    int max_width,          // 텍스트 박스 폭(px)
-                    int line_height,        // 줄 간격(px)
+                    int max_width,          
+                    int line_height,       
                     const char *text,
                     S_M1_text_align_t align);
 void m1_image_message(const uint8_t *pimage, uint8_t image_w, uint8_t image_h, const char *message);
@@ -225,6 +230,19 @@ void m1_gui_menu_update(const S_M1_Menu_t *phmenu, uint8_t sel_item, uint8_t dir
 	menu_display[menu_level].disp_top_row = disp_window_top_row;
 	menu_display[menu_level].active_disp_row = disp_window_active_row;
 } // void m1_gui_menu_update(const S_M1_Menu_t *phmenu, uint8_t sel_item, uint8_t direction)
+
+/* Force the shared submenu renderer (m1_gui_submenu_update) onto its SUB-menu
+ * presentation. Native saved-file action menus (NFC read-more, RFID saved
+ * submenu) render through that shared path but key off the global menu_level_id.
+ * Reached from the SD-card browser (storage_explore / HOME-LEFT) OUTSIDE the menu
+ * system, menu_level_id is never updated and can be stale at 0 -- wrongly picking
+ * the main-menu look (left icons + large font). The browser dispatch calls this
+ * first so those menus render IDENTICALLY to their NFC/RFID -> Saved entry. No-op
+ * for menu-system entries (menu_level_id already sub-level). */
+void m1_gui_force_sub_menu_level(void)
+{
+	menu_level_id = 1;
+}
 
 
 
@@ -415,6 +433,71 @@ uint8_t m1_gui_submenu_update(const char *phmenu[], uint8_t num_items, uint8_t s
 	menu_frame_y = menu_text_frame_top_pos_y[menu_level_id];
 	menu_text_y = menu_text_top_pos_y[menu_level_id];
 
+	if ( menu_level_id == 0 )
+	{
+		/* ----- Approved full-width scrolling main-menu presentation -----
+		 * 8-item scrollable list, 4 visible 16px rows; full-width selection band
+		 * with white icon + title; a 2px selection-position indicator on the
+		 * right. Consumes the existing scroll state (disp_window_top_row,
+		 * disp_window_bottom_row, active_item, sel_item) WITHOUT modifying it.
+		 * Submenu rendering (menu_level_id != 0) is left unchanged below. */
+		uint8_t mm_row_y = 0;
+		for ( run = disp_window_top_row; run <= disp_window_bottom_row; run++ )
+		{
+			if ( run == active_item )
+			{
+				/* full-width black selection band; icon + title drawn white */
+				u8g2_DrawBox(&m1_u8g2, MAIN_MENU2_SEL_BAND_LEFT_POS_X, mm_row_y, MAIN_MENU2_SEL_BAND_W, MAIN_MENU2_ROW_H);
+				u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_BG); // white
+				u8g2_DrawXBMP(&m1_u8g2, MAIN_MENU2_ICON_LEFT_POS_X, mm_row_y + 1, MAIN_MENU_ICON_WIDTH, MAIN_MENU_ICON_HEIGHT, this_gui_menu->submenu[run - 1]->icon_ptr);
+				u8g2_SetFont(&m1_u8g2, menu_text_font_b[0]);  // selected row: helvB08
+				u8g2_DrawStr(&m1_u8g2, MAIN_MENU2_TXT_LEFT_POS_X, mm_row_y + MAIN_MENU2_TXT_BASELINE_OFFSET, phmenu[run - 1]);
+				u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_TXT); // restore black
+			}
+			else
+			{
+				/* black icon + title on white */
+				u8g2_DrawXBMP(&m1_u8g2, MAIN_MENU2_ICON_LEFT_POS_X, mm_row_y + 1, MAIN_MENU_ICON_WIDTH, MAIN_MENU_ICON_HEIGHT, this_gui_menu->submenu[run - 1]->icon_ptr);
+				u8g2_SetFont(&m1_u8g2, menu_text_font_n[0]);  // unselected: resoledmedium
+				u8g2_DrawStr(&m1_u8g2, MAIN_MENU2_TXT_LEFT_POS_X, mm_row_y + MAIN_MENU2_TXT_BASELINE_OFFSET, phmenu[run - 1]);
+			}
+			mm_row_y += MAIN_MENU2_ROW_H;
+		}
+
+		/* Selection-position indicator: a ~ (64/num_items) px marker placed in one
+		 * of num_items discrete positions (top = first item, bottom = last item).
+		 * Endpoint-correct; drawn last so the selection band cannot cover it.
+		 * Zero/one-item cases guarded before the division. */
+		{
+			uint8_t mm_mh, mm_my;
+			if ( num_items <= 1 )
+			{
+				mm_mh = M1_LCD_DISPLAY_HEIGHT;
+				mm_my = 0;
+			}
+			else
+			{
+				mm_mh = M1_LCD_DISPLAY_HEIGHT / num_items;
+				if ( mm_mh == 0 )
+					mm_mh = 1;
+				mm_my = (uint8_t)( ((uint16_t)(M1_LCD_DISPLAY_HEIGHT - mm_mh) * sel_item) / (num_items - 1) );
+			}
+			u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_TXT);
+			u8g2_DrawBox(&m1_u8g2, MAIN_MENU2_POSIND_POS_X, mm_my, MAIN_MENU2_POSIND_W, mm_mh);
+		}
+
+		u8g2_NextPage(&m1_u8g2); // Update display RAM
+
+		// Back up (identical to the shared path below)
+		if ( x_menu_update_init )
+		{
+			x_menu_display[x_menu_level].active_disp_row = disp_window_active_row;
+			x_menu_display[x_menu_level].disp_top_row = disp_window_top_row;
+			x_menu_display[x_menu_level].sel_item = sel_item;
+		}
+		return 0;
+	} // if ( menu_level_id == 0 ) -- new full-width main-menu presentation
+
 	u8g2_SetFont(&m1_u8g2, menu_text_font_n[menu_level_id]);
 	for (run=disp_window_top_row; run<=disp_window_bottom_row; run++)
 	{
@@ -485,30 +568,16 @@ uint8_t m1_gui_submenu_update(const char *phmenu[], uint8_t num_items, uint8_t s
 /*============================================================================*/
 void m1_gui_scr_animation(void)
 {
-	static uint8_t image_index = 0;
-	static uint32_t time_t0 = 0;
-	static uint32_t time_tn = 0;
-
-	if ( m1_device_stat.op_mode != M1_OPERATION_MODE_DISPLAY_ON ) // do animation at welcome screen only
+	/* Boot/welcome M1 logo removed (menu_m1_icon_M1_logo_1 erased from the code).
+	 * Nothing to animate; leave the panel blank if this is ever re-enabled. */
+	if ( m1_device_stat.op_mode != M1_OPERATION_MODE_DISPLAY_ON ) // welcome screen only
 		return;
 
-	time_tn = HAL_GetTick();
-	if ( (time_tn - time_t0) >= MENU_M1_SCR_ANI_TIMEOUT )
+	u8g2_FirstPage(&m1_u8g2);
+	do
 	{
-		time_t0 = time_tn; // save current time
-		image_index++;
-		if ( image_index >= MENU_M1_LOGO_ARRAY_LEN )
-			image_index = 0;
-
-		// Draw time measured approximately 14ms for a full screen
-		// CPU running at 75MHz
-		// I2C speed = 400KHz
-		u8g2_FirstPage(&m1_u8g2);
-		do
-	    {
-			u8g2_DrawXBMP(&m1_u8g2, 0, 0, M1_LCD_DISPLAY_WIDTH, M1_LCD_DISPLAY_HEIGHT, menu_m1_logo_array[image_index]);
-	    } while (u8g2_NextPage(&m1_u8g2));
-	} // if ( (time_tn - time_t0) >= MENU_M1_SCR_ANI_TIMEOUT )
+		/* intentionally blank -- no logo */
+	} while (u8g2_NextPage(&m1_u8g2));
 } // void m1_gui_scr_animation(void)
 
 
@@ -595,45 +664,94 @@ void m1_info_box_display_draw(uint8_t box_row, const uint8_t *ptext)
 /*============================================================================*/
 uint8_t m1_message_box(u8g2_t *u8g2, const char *title1, const char *title2, const char *title3, const char *buttons)
 {
+    S_M1_Main_Q_t q_item;
+    S_M1_Buttons_Status this_button_status;
+    BaseType_t ret;
 
-  u8g2_UserInterfaceMessage(u8g2, title1, title2, title3, buttons);
+    u8g2_UserInterfaceMessage(u8g2, title1, title2, title3, buttons);
 
-  for(;;)
-  {
-      S_M1_Main_Q_t q_item;
-      S_M1_Buttons_Status this_button_status;
-      BaseType_t ret;
+    for(;;)
+    {
+  		ret = xQueueReceive(main_q_hdl, &q_item, portMAX_DELAY);
+  		if (ret==pdTRUE)
+  		{
+  			if ( q_item.q_evt_type==Q_EVENT_KEYPAD )
+  			{
+  				// Notification is only sent to this task when there's any button activity,
+  				// so it doesn't need to wait when reading the event from the queue
+  				ret = xQueueReceive(button_events_q_hdl, &this_button_status, 0);
+  				if ( this_button_status.event[BUTTON_BACK_KP_ID]==BUTTON_EVENT_CLICK ) // user wants to exit?
+  				{
+  					; // Do extra tasks here if needed
+  					xQueueReset(main_q_hdl); // Reset main q before return
+  					break; // Exit and return to the calling task (subfunc_handler_task)
+  				} // if ( m1_buttons_status[BUTTON_BACK_KP_ID]==BUTTON_EVENT_CLICK )
+  				else
+  				{
+  					; // Do other things for this task, if needed
+  				}
+  			} // if ( q_item.q_evt_type==Q_EVENT_KEYPAD )
+  			else
+  			{
+  				; // Do other things for this task
+  			}
+  		} // if (ret==pdTRUE)
+    }
 
+    /* never reached */
+    return 0;
+}
+
+/*============================================================================*/
+/**
+ * @brief m1_draw_file_saved_screen - Universal "file saved" success splash.
+ *
+ * Shared success visual for EVERY save-to-file operation (NFC save / Edit-UID
+ * save-back / Rename, RFID save / UID-edit / Rename / Add-manual, Sub-GHz
+ * Record save, Wi-Fi handshake-to-SD, Bluetooth device export). Draws the
+ * approved m1_saved_screen_128x64 asset pixel-for-pixel, full-screen -- the
+ * same bitmap for every caller, not a per-feature duplicate. DRAW ONLY --
+ * each caller keeps its own return/timeout/blocking behaviour; this function
+ * has no effect on any workflow's existing dismiss timing. */
+/*============================================================================*/
+void m1_draw_file_saved_screen(void)
+{
+	u8g2_FirstPage(&m1_u8g2);
+	u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_TXT);
+	u8g2_DrawXBMP(&m1_u8g2, 0, 0, 128, 64, m1_saved_screen_128x64);
+	m1_u8g2_nextpage();
+}
+
+/*============================================================================*/
+/**
+ * @brief m1_wait_back_to_exit - Block until BACK is pressed, then return.
+ *
+ * Same main-queue/button wait m1_message_box uses, exposed so a caller can pair
+ * it with a custom full-screen splash (the shared file-saved screen) while
+ * keeping the existing "BACK to exit" blocking semantics. */
+/*============================================================================*/
+void m1_wait_back_to_exit(void)
+{
+	S_M1_Main_Q_t q_item;
+	S_M1_Buttons_Status this_button_status;
+	BaseType_t ret;
+
+	for (;;)
+	{
 		ret = xQueueReceive(main_q_hdl, &q_item, portMAX_DELAY);
 		if (ret==pdTRUE)
 		{
 			if ( q_item.q_evt_type==Q_EVENT_KEYPAD )
 			{
-				// Notification is only sent to this task when there's any button activity,
-				// so it doesn't need to wait when reading the event from the queue
 				ret = xQueueReceive(button_events_q_hdl, &this_button_status, 0);
-				if ( this_button_status.event[BUTTON_BACK_KP_ID]==BUTTON_EVENT_CLICK ) // user wants to exit?
+				if ( this_button_status.event[BUTTON_BACK_KP_ID]==BUTTON_EVENT_CLICK )
 				{
-					; // Do extra tasks here if needed
-
-					xQueueReset(main_q_hdl); // Reset main q before return
-					break; // Exit and return to the calling task (subfunc_handler_task)
-				} // if ( m1_buttons_status[BUTTON_BACK_KP_ID]==BUTTON_EVENT_CLICK )
-				else
-				{
-					; // Do other things for this task, if needed
+					xQueueReset(main_q_hdl);
+					break;
 				}
-			} // if ( q_item.q_evt_type==Q_EVENT_KEYPAD )
-			else
-			{
-				; // Do other things for this task
 			}
-		} // if (ret==pdTRUE)
-
-  }
-
-  /* never reached */
-  return 0;
+		}
+	}
 }
 
 
@@ -703,8 +821,8 @@ void m1_draw_text(u8g2_t *u8g2,
 /*============================================================================*/
 void m1_draw_text_box(u8g2_t *u8g2,
                     int x, int y,
-                    int max_width,          // 텍스트 박스 폭(px)
-                    int line_height,        // 줄 간격(px)
+                    int max_width,
+                    int line_height,
                     const char *text,
                     S_M1_text_align_t align)
 {
@@ -714,12 +832,8 @@ void m1_draw_text_box(u8g2_t *u8g2,
 
     while (*p)
     {
-        /* -----------------------------
-         * 1) '\n' 이 나오면 강제 줄바꿈
-         * ----------------------------- */
         if (*p == '\n')
         {
-            // 지금까지 쌓인 line 출력 (있다면)
             if (line_len > 0)
             {
                 line[line_len] = '\0';
@@ -746,29 +860,24 @@ void m1_draw_text_box(u8g2_t *u8g2,
                 y += line_height;
             }
 
-            // 새 줄 준비
             line_len = 0;
-            p++;            // '\n' 문자 소비
+            p++;
             continue;
         }
 
-        /* -----------------------------
-         * 2) 일반 문자 처리
-         * ----------------------------- */
+
         line[line_len] = *p;
         line[line_len + 1] = '\0';
 
         uint16_t w = u8g2_GetStrWidth(u8g2, line);
 
-        // 폭 초과 → 이전 글자까지 출력
         if (w > max_width)
         {
-            line[line_len] = '\0';  // 마지막 한 글자 빼고 확정된 라인 출력
+            line[line_len] = '\0';
 
             int draw_x = x;
             uint16_t line_width = u8g2_GetStrWidth(u8g2, line);
 
-            // 정렬 처리
             switch (align)
             {
                 case TEXT_ALIGN_CENTER:
@@ -787,16 +896,14 @@ void m1_draw_text_box(u8g2_t *u8g2,
             u8g2_DrawStr(u8g2, draw_x, y, line);
             y += line_height;
 
-            // 다음 라인 준비 (현재 글자 다시 시작)
             line_len = 0;
-            continue;   // *p 는 다시 처리
+            continue;
         }
 
         line_len++;
         p++;
     }
 
-    // 마지막 라인 출력
     if (line_len > 0)
     {
         line[line_len] = '\0';
@@ -873,6 +980,8 @@ void m1_image_message(const uint8_t *pimage, uint8_t image_w, uint8_t image_h, c
 		clr_box_h = M1_LCD_DISPLAY_HEIGHT;
 	}
 
+	u8g2_FirstPage(&m1_u8g2);	//+2026_0513_01
+
 	u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_BG); // set to background color
 	// Draw solid box to clear existing content
 	u8g2_DrawBox(&m1_u8g2, clr_box_x, clr_box_y, clr_box_w, clr_box_h);
@@ -908,3 +1017,55 @@ void m1_gui_let_update_fw(void)
 		u8g2_DrawStr(&m1_u8g2, 30, 62, "Coming soon");
     } while (u8g2_NextPage(&m1_u8g2));
 } // void m1_gui_let_update_fw(void)
+
+/*============================================================================*/
+/* @brief m1_draw_write_screen - Shared NFC/RFID Write screen graphic.
+ *
+ * Renders the approved Write/Success screen: a centered horizontal card icon
+ * (same visual family/weight as the NFC/RFID Read and Emulate screens) flanked
+ * by three inward-pointing RF arrows on each side, with one centered status
+ * line below.  Rendering only -- no polling/write/verify/timeout/buzzer/
+ * navigation logic.  Callers pass "WRITING..." during the write and "SUCCESS"
+ * on a verified success (identical graphic; only the status text changes).
+ *
+ * @param[in] status Centered status string ("WRITING..." or "SUCCESS")
+ * @retval None
+ */
+/*============================================================================*/
+void m1_draw_write_screen(const char *status)
+{
+	int i, t, w;
+
+	u8g2_FirstPage(&m1_u8g2);
+	u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_TXT);
+
+	/* Same rounded tag (44x24) + chip dot as the Read/Emulate screens, drawn
+	 * from the shared m1_read_icon geometry so it can never drift. */
+	m1_read_icon_draw_tag(&m1_u8g2);
+
+	/* three left arrows  >>>  pointing RIGHT toward the tag (compact) */
+	for (i = 0; i < 3; i++) {
+		int vx = 22 + i * 8;
+		int ax = vx - 4;
+		for (t = 0; t < 2; t++) {
+			u8g2_DrawLine(&m1_u8g2, ax + t, 19, vx + t, 23);
+			u8g2_DrawLine(&m1_u8g2, vx + t, 23, ax + t, 27);
+		}
+	}
+
+	/* three right arrows  <<<  pointing LEFT toward the tag (compact) */
+	for (i = 0; i < 3; i++) {
+		int vx = 106 - i * 8;
+		int ax = vx + 4;
+		for (t = 0; t < 2; t++) {
+			u8g2_DrawLine(&m1_u8g2, ax + t, 19, vx + t, 23);
+			u8g2_DrawLine(&m1_u8g2, vx + t, 23, ax + t, 27);
+		}
+	}
+
+	/* centered status line -- same caption font as the Read/Emulate screens */
+	u8g2_SetFont(&m1_u8g2, M1_READ_ICON_CAPTION_FONT);
+	w = (int)u8g2_GetStrWidth(&m1_u8g2, status);
+	u8g2_DrawStr(&m1_u8g2, (128 - w) / 2, 58, status);
+	m1_u8g2_nextpage();
+}

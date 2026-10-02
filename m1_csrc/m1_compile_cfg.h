@@ -16,7 +16,7 @@
 #include "cmsis_os.h"
 
 /*============================================================================*/
-/*						A P P   D I R E C T I V E S		  					*/
+/*						A P P   D I R E C T I V E S		  					  */
 /*============================================================================*/
 
 #define M1_APP_GPIO_OWN_DEFINES // Let use own GPIO defines with better format in main.h, instead of default defines by STM32CubeIDE
@@ -64,7 +64,6 @@ extern void assert_failed();
 /*============================================================================*/
 /*					D E B U G   D I R E C T I V E S		  					*/
 /*============================================================================*/
-
 #define M1_DEBUG_CLI_ENABLE	// Enable the CLI function for debugging and testing
 
 #endif /* M1_COMPILE_CFG_H_ */

@@ -18,10 +18,10 @@
 
 #define SUBGHZ_RAW_DATA_PULSE_COUNT_MAX		20
 
-#define INTERPACKET_GAP_MIN					1500 // uS
+#define INTERPACKET_GAP_MIN					4000 // uS (was 1500; collided with ~1500us bit-long of Linear etc.)
 #define INTERPACKET_GAP_MAX					80000//5000 // uS
 #define PACKET_PULSE_TIME_MIN				120 // uS
-#define PACKET_PULSE_COUNT_MIN				48 // 24 bits
+#define PACKET_PULSE_COUNT_MIN				16 // 8 bits min (was 48=24bits; blocked CAME/Linear/short protocols)
 #define PACKET_PULSE_COUNT_MAX				128 // 64 bits
 
 #define PACKET_PULSE_TIME_TOLERANCE20		20 // percentage
@@ -84,18 +84,35 @@ typedef struct
 
 enum {
 	PRINCETON = 0,
-	SECURITY_PLUS_20
+	CAME_24, CAME_12, NICE_FLO_24, NICE_FLO_12, GATE_TX
+	/* LINEAR is a subghz module (see modules/) */
 };
 
 extern SubGHz_DecEnc_t subghz_decenc_ctl;
 extern const char *protocol_text[];
 extern const SubGHz_protocol_t subghz_protocols_list[];
 
+/* Decoder registry: one module per protocol { name, decode fn }, parallel to subghz_protocols_list[] */
+typedef struct { const char *name; uint8_t (*decode)(uint16_t p, uint16_t pulsecount); } SubGHz_Decoder_t;
+extern const SubGHz_Decoder_t subghz_decoder_registry[];
+uint8_t subghz_decode_fixedcode(uint16_t p, uint16_t pulsecount);
+const char *subghz_protocol_name(uint16_t proto);
+extern const uint16_t subghz_n_decoders;
+extern volatile uint32_t subghz_diag_isr_pulses;
+extern volatile uint32_t subghz_diag_insert_fail;
+extern volatile uint32_t subghz_diag_drained;
+extern volatile uint32_t subghz_diag_submitted;
+extern volatile uint32_t subghz_diag_attempts;
+extern volatile uint32_t subghz_diag_decoded;
+void subghz_scan_diag_reset(void);
+extern volatile uint16_t subghz_seg_guard;
+
 void subghz_decenc_init(void);
 bool subghz_decenc_read(SubGHz_Dec_Info_t *received, bool raw);
 uint16_t get_diff(uint16_t n_a, uint16_t n_b);
 uint8_t subghz_decode_princeton(uint16_t p, uint16_t pulsecount);
 uint8_t subghz_decode_security_plus_20(uint16_t p, uint16_t pulsecount);
+uint8_t subghz_decode_pwm(uint16_t p, uint16_t pulsecount);
 uint8_t m1_secplus_v2_decode(uint32_t fixed[], uint8_t half_codes[][10], uint32_t *rolling_code, uint64_t *out_bits);
 uint8_t m1_secplus_v2_decode_half(uint64_t in_bits, uint8_t *half_code, uint32_t *out_bits);
 

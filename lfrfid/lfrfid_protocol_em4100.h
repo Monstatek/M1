@@ -3,12 +3,6 @@
 /*
  * LF RFID (125 kHz) implementation
  *
- * Portions of the data structure definitions and table-driven
- * architecture were adapted from the Flipper Zero firmware project.
- *
- * Original project:
- * https://github.com/flipperdevices/flipperzero-firmware
- *
  * Licensed under the GNU General Public License v3.0 (GPLv3).
  *
  * The functional implementation and modifications were

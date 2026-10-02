@@ -29,5 +29,6 @@
 #define M1_BATT_DESIGN_ENERGY		(uint16_t)(7770) // mWh, Design capacity * 3.7V
 #define M1_STATE_QMAX_CELL			(uint16_t)(0x4C50) // 19536
 #define M1_STATE_QMAX_CELL_DEFAULT	(uint16_t)(0x4000) // Default 16384
+#define M1_STATE_TAPER_RATE         (uint16_t)(150)
 #endif // BQ27421_GOLDEN_IMAGE_H_
 

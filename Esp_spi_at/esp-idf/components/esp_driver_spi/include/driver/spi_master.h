@@ -39,7 +39,7 @@ extern "C"
 {
 #endif
 
-/* Moved from app_main.c */
+/* Moved from app_main.c */ // B.N @ MonstaTek 2025
 typedef enum {
     SPI_NULL = 0,
     SPI_READ,         // slave -> master

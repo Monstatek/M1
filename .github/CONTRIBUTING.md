@@ -1,5 +1,3 @@
-<!-- See COPYING.txt for license details. -->
-
 # Contributing to M1 NFC Project
 
 Thank you for your interest in contributing to our M1 project! This document provides guidelines and processes for contributing to the project.
@@ -23,11 +21,11 @@ This project and everyone participating in it is governed by our [Code of Conduc
 1. Fork the repository
 2. Clone your fork:
    ```bash
-   git clone https://github.com/your-username/m1_01.git
+   git clone https://github.com/YOUR-USERNAME/m1_01.git
    ```
 3. Add the upstream repository:
    ```bash
-   git remote add upstream https://github.com/YOUR_ORG/m1_01.git
+   git remote add upstream https://github.com/Monstatek/m1_01.git
    ```
 4. Create a new branch:
    ```bash
@@ -136,6 +134,7 @@ When creating a pull request, please include:
 ## Documentation
 
 - Update README.md when adding new features
+- Start at the [technical documentation index](../docs/README.md)
 - Document all public APIs
 - Include Doxygen-style comments for functions
 - Update changelog
@@ -161,15 +160,15 @@ When creating a pull request, please include:
 ## Additional Resources
 
 - [STM32 HAL Documentation](https://www.st.com/en/embedded-software/stm32cube-mcu-mpu-packages.html)
-- [M1 Documentation](documentation/)
+- [M1 build documentation](../documentation/mbt.md)
 - [Code of Conduct](CODE_OF_CONDUCT.md)
-- [License](LICENSE)
+- [License](../LICENSE)
 - [Security Policy](SECURITY.md)
 
 ## Questions?
 
-- Open an [Issue](https://github.com/YOUR_ORG/m1_01/issues) for support or questions
-- Use [GitHub Discussions](https://github.com/YOUR_ORG/m1_01/discussions) for community discussions
+Feel free to contact the maintainers if you have any questions:
+- [MonstaTek maintainers](mailto:minujaeger@monstatek.com)
 
 ## Recognition
 
@@ -179,4 +178,4 @@ Contributors will be recognized in our [CONTRIBUTORS.md](CONTRIBUTORS.md) file.
 
 Remember that this is a guideline, not a rule book. Use your best judgment, and feel free to propose changes to this document in a pull request.
 
-Thank you for contributing! 🎉 
+Thank you for contributing! 🎉

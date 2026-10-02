@@ -3,15 +3,6 @@
 /*
  * T5577 LF RFID implementation
  *
- * This file is derived from the Flipper Zero firmware project.
- * The original implementation has been modified to support
- * Monstatek hardware by adapting the hardware abstraction layer.
- *
- * Original project:
- * https://github.com/flipperdevices/flipperzero-firmware
- *
- * Copyright (C) Flipper Devices Inc.
- *
  * Licensed under the GNU General Public License v3.0 (GPLv3).
  *
  * Modifications:

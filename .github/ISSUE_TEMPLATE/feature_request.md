@@ -1,5 +1,3 @@
-<!-- See COPYING.txt for license details. -->
-
 ---
 name: Feature request
 about: Suggest an idea for this project

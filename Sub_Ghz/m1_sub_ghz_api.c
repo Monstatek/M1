@@ -29,7 +29,6 @@
 #include "radio_config/si4463_revc2_433_rxtx_spacing250_bw200_baud10_error1_10_OOK.h"
 #include "radio_config/si4463_revc2_433_92_rxtx_spacing250_bw100_baud10_error1_10_OOK.h"
 #include "radio_config/m1_sub_ghz_915_rxtx_spc25_bwauto_baud106_dev200_e1_10_fsk.h"
-#include "radio_config/m1_sub_ghz_xxx_tx_test.h"
 
 /*************************** D E F I N E S ************************************/
 
@@ -61,7 +60,6 @@ static uint8_t si446x_got_reset = FALSE;
 static union si446x_cmd_reply_union si446x_cmd;
 
 /*! Si446x configuration array */
-
 const uint8_t Radio_300_Configuration_Data_Array[] = RADIO_300_CONFIGURATION_DATA_ARRAY;
 const tRadioConfiguration RadioConfiguration_300 = RADIO_300_CONFIGURATION_DATA;
 
@@ -89,8 +87,6 @@ const tRadioConfiguration RadioConfiguration_433_92 = RADIO_433_92_CONFIGURATION
 const uint8_t Radio_915_Configuration_Data_Array[] = RADIO_915_CONFIGURATION_DATA_ARRAY;
 const tRadioConfiguration RadioConfiguration_915 = RADIO_915_CONFIGURATION_DATA;
 
-const uint8_t Radio_Test_Configuration_Data_Array[] = RADIO_TEST_CONFIGURATION_DATA_ARRAY;
-const tRadioConfiguration RadioConfiguration_Test = RADIO_TEST_CONFIGURATION_DATA;
 
 const uint8_t Radio_Patch_Configuration_Data_Array[] = RADIO_PATCH_CONFIGURATION_DATA_ARRAY;
 const tRadioConfiguration RadioConfiguration_Patch = RADIO_PATCH_CONFIGURATION_DATA;
@@ -102,8 +98,8 @@ const tRadioConfiguration *RadioConfigList[SUB_GHZ_BAND_EOL] = {
 																		&RadioConfiguration_345,
 																		&RadioConfiguration_372,
 																		&RadioConfiguration_390,
-																		&RadioConfiguration_433,
-																		&RadioConfiguration_433_92,
+																		&RadioConfiguration_433_92, /* index 6 -> 433.920 (reordered) */
+																		&RadioConfiguration_433,    /* index 7 -> 434.059 (reordered) */
 																		&RadioConfiguration_915,
 																	};
 
@@ -219,9 +215,7 @@ void SI446x_PowerUp(void)
 {
     /* Hardware reset the chip */
     SI446x_Reset();
-
     radio_patch_init();
-
 #ifdef M1_APP_RADIO_POLL_CTS_ON_GPIO
     SI446x_Wait_CTS();
 #else
@@ -1036,6 +1030,99 @@ void radio_init_rx_tx(S_M1_SubGHz_Band freq, uint8_t mod_type, bool do_reset)
     radio_init_done = TRUE;
     radio_state_flag = RADIO_STATE_IDLE;
 } // void radio_init_rx_tx(S_M1_SubGHz_Band freq, uint8_t mod_type, bool do_reset)
+
+
+
+/*
+ * SI4463 synthesizer coverage test used by the Record RAW extended frequency
+ * list. Returns true if 'hz' falls in a band this driver can program with a
+ * known-good base configuration (outdiv). This is a RECEIVE/tuning-capability
+ * test only; it says nothing about TX power, RF matching, or regional policy.
+ */
+bool radio_freq_in_range(uint32_t hz)
+{
+    if ( hz >= 705000000UL && hz <= 1050000000UL ) return true;  /* outdiv 4  */
+    if ( hz >= 353000000UL && hz <= 525000000UL  ) return true;  /* outdiv 8  */
+    if ( hz >= 235000000UL && hz <= 350000000UL  ) return true;  /* outdiv 12 */
+    return false;
+} // bool radio_freq_in_range(uint32_t hz)
+
+
+
+/*
+ * radio_tune_exact_hz()
+ *
+ * Program the SI4463 to an EXACT frequency (integer Hz). A known-good base
+ * configuration is loaded first (this sets MODEM_CLKGEN_BAND / outdiv and the
+ * modem parameters for the target band); FC_INTE and FC_FRAC are then overridden
+ * to place the PLL on the exact requested frequency.
+ *
+ * Synthesis (verified against the factory 300 / 434.059 / 915 configs):
+ *     f_rf = (FC_INTE + FC_FRAC / 2^19) * (2 * XO / outdiv),   XO = 32 MHz
+ *   =>  N       = f_rf * outdiv / (2 * XO)
+ *       FC_INTE = floor(N) - 1
+ *       FC_FRAC = round( (N - FC_INTE) * 2^19 )     (always in [2^19, 2^20))
+ *
+ * No silent fallback: an out-of-range / unrepresentable / un-applied tune is
+ * reported via a RADIO_TUNE_ERR_* code. RX sensitivity, TX output power / RF
+ * matching and regional TX enablement are NOT validated here (factory-pending).
+ *
+ * Returns RADIO_TUNE_OK or a RADIO_TUNE_ERR_* code.
+ */
+uint8_t radio_tune_exact_hz(uint32_t hz, uint8_t mod_type, bool do_reset)
+{
+    S_M1_SubGHz_Band base_band;
+    uint32_t outdiv;
+    double   n;
+    uint8_t  fc_inte;
+    uint32_t fc_frac;
+
+    /* 1) Range -> outdiv + base config (SI4463 synthesizer bands). */
+    if ( hz >= 705000000UL && hz <= 1050000000UL )
+    {
+        outdiv = 4;  base_band = SUB_GHZ_BAND_915;  /* only 900 MHz config   */
+    }
+    else if ( hz >= 353000000UL && hz <= 525000000UL )
+    {
+        outdiv = 8;  base_band = SUB_GHZ_BAND_433;  /* tested 434 OOK config */
+    }
+    else if ( hz >= 235000000UL && hz <= 350000000UL )
+    {
+        outdiv = 12; base_band = SUB_GHZ_BAND_300;
+    }
+    else
+    {
+        return RADIO_TUNE_ERR_RANGE;                /* outside coverage      */
+    }
+
+    /* 2) Compute FC_INTE / FC_FRAC for the exact frequency. */
+    n = (double)hz * (double)outdiv / 64000000.0;   /* 2 * XO = 64 MHz       */
+    if ( n < 2.0 || n >= 128.0 )
+        return RADIO_TUNE_ERR_CALC;                 /* FC_INTE would not fit */
+    fc_inte = (uint8_t)((uint32_t)n - 1U);
+    fc_frac = (uint32_t)(((n - (double)fc_inte) * 524288.0) + 0.5); /* * 2^19 */
+    if ( fc_frac < 0x080000UL || fc_frac > 0x0FFFFFUL )
+        return RADIO_TUNE_ERR_CALC;                 /* FC_FRAC out of field  */
+
+    /* 3) Load the base config (outdiv + modem), then override FREQ_CONTROL. */
+    radio_init_rx_tx(base_band, mod_type, do_reset);
+    SI446x_Select_Frontend(base_band);
+
+    si446x_cmd_buffer[0] = SI446X_CMD_ID_SET_PROPERTY;         /* 0x11             */
+    si446x_cmd_buffer[1] = 0x40;                               /* FREQ_CONTROL grp */
+    si446x_cmd_buffer[2] = 0x04;                               /* FC_INTE + 3 FRAC */
+    si446x_cmd_buffer[3] = 0x00;                               /* start = FC_INTE  */
+    si446x_cmd_buffer[4] = fc_inte;
+    si446x_cmd_buffer[5] = (uint8_t)((fc_frac >> 16) & 0xFF);  /* FC_FRAC2         */
+    si446x_cmd_buffer[6] = (uint8_t)((fc_frac >>  8) & 0xFF);  /* FC_FRAC1         */
+    si446x_cmd_buffer[7] = (uint8_t)( fc_frac        & 0xFF);  /* FC_FRAC0         */
+    if ( SI446x_Send_Cmd(8, si446x_cmd_buffer) != 0 )
+        return RADIO_TUNE_ERR_APPLY;                /* radio CTS / apply fault */
+
+    M1_LOG_D(M1_LOGDB_TAG, "TUNE hz=%lu outdiv=%lu INTE=0x%02X FRAC=0x%06lX\r\n",
+             (unsigned long)hz, (unsigned long)outdiv, fc_inte, (unsigned long)fc_frac);
+    return RADIO_TUNE_OK;
+} // uint8_t radio_tune_exact_hz(uint32_t hz, uint8_t mod_type, bool do_reset)
 
 
 

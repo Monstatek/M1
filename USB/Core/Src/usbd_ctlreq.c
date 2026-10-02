@@ -15,6 +15,8 @@
   *
   ******************************************************************************
   */
+#pragma GCC push_options
+#pragma GCC optimize("O0")
 
 /* Includes ------------------------------------------------------------------*/
 #include "usbd_ctlreq.h"
@@ -1049,3 +1051,4 @@ static uint8_t USBD_GetLen(uint8_t *buf)
   * @}
   */
 
+#pragma GCC push_options

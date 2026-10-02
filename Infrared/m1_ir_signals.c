@@ -187,7 +187,6 @@ const S_M1_Ir_Remote_List_t ir_remote_list[] = // The list order must match that
 
 uint8_t ir_remote_file_header_check(const char *remotes_filename, uint8_t remote_type);
 uint8_t ir_remote_file_data_check(uint8_t remote_type);
-static uint8_t ir_datfile_keywords_check(char *instr, char *keyword, char delimiter);
 static uint8_t ir_datfile_keyword_val_get(char *instr, uint32_t *out_val, uint8_t val_type, bool validation_req);
 static uint8_t ir_datfile_keyword_payload_get(char *token, uint8_t payload_id, bool validation_req);
 uint8_t ir_remote_function_data_read(uint8_t remote_type, uint8_t function_type);
@@ -405,7 +404,7 @@ uint8_t ir_remote_function_data_read(uint8_t remote_type, uint8_t function_type)
 			read_more = 0;
 			token = sdcard_buffer_run_ptr; // Restore pointer to the beginning of the string
 			token_len = strlen(ir_datfile_payload_keywords[payload_id]);
-			ret_val = ir_datfile_keywords_check(token, ir_datfile_payload_keywords[payload_id], IR_SIGNALS_KEYWORD_DELIMITER);
+			ret_val = m1_datfile_keywords_check(token, ir_datfile_payload_keywords[payload_id], IR_SIGNALS_KEYWORD_DELIMITER);
 			if ( ret_val ) // Not found, found at the wrong position, or being a comment?
 			{
 				if ( token[0]==(uint8_t)IR_SIGNALS_KEYWORD_COMMENT ) // A comment?
@@ -431,7 +430,7 @@ uint8_t ir_remote_function_data_read(uint8_t remote_type, uint8_t function_type)
 					}
 					if ( function_id >= this_ir_remote->ir_remote_func_list ) // Search not found
 						break;
-					if ( ir_datfile_keywords_check(&token[token_len + 1], this_ir_remote->ir_remote_type_functions[function_id], '\x0') )
+					if ( m1_datfile_keywords_check(&token[token_len + 1], this_ir_remote->ir_remote_type_functions[function_id], '\x0') )
 						break;
 					if ( function_type==IR_REMOTETYPE_ALL_DEVICES_NONE ) // All function types?
 						ir_remote_dev_func_counter[function_id]++; // Add to counter
@@ -459,7 +458,7 @@ uint8_t ir_remote_function_data_read(uint8_t remote_type, uint8_t function_type)
 				{
 					break;
 				}
-				if ( ir_datfile_keywords_check(&token[token_len + 1], runptr, '\0') )
+				if ( m1_datfile_keywords_check(&token[token_len + 1], runptr, '\0') )
 					break;
 				payload_id++;
 				if ( ir_data_type==IR_DATATYPE_RAW )
@@ -594,30 +593,6 @@ uint8_t ir_remote_function_data_read(uint8_t remote_type, uint8_t function_type)
 
 	return error_code;
 } // uint8_t ir_remote_function_data_read(uint8_t remote_type, uint8_t function_type)
-
-
-
-/*============================================================================*/
-/**
-  * @brief
-  * @param
-  * @retval
-  */
-/*============================================================================*/
-static uint8_t ir_datfile_keywords_check(char *instr, char *keyword, char delimiter)
-{
-	uint8_t error_code = 0;
-	char keywords[20], *runptr;
-
-	sprintf(keywords, "%s%c", keyword, delimiter);
-	runptr = strstr(instr, keywords);
-	if ( runptr!=instr ) // Not found or found at the wrong position?
-	{
-		error_code = 1;
-	} // if ( runptr != instr )
-
-	return error_code;
-} // static uint8_t ir_datfile_keywords_check(char *instr, char *keyword, char delimiter)
 
 
 

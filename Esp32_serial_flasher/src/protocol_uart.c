@@ -20,6 +20,7 @@
 #include "slip.h"
 #include <stddef.h>
 #include <string.h>
+#include "m1_esp32_perf.h" /* MonstaTek: measured (not assumed) command/delay counters -- see that header */
 
 static esp_loader_error_t check_response(const send_cmd_config *config);
 
@@ -103,7 +104,10 @@ esp_loader_error_t send_cmd(const send_cmd_config *config)
 
     // Giving some time for the ISR to receive data from the ESP32
     // Without this delay, most of response data will be lost due to unexpected huge ISR latency!!!
+    // B.N@MonstaTek 2025
     HAL_Delay(100);
+    m1_esp32_perf_note_command();
+    m1_esp32_perf_note_fixed_delay(100U);   /* MonstaTek: measured, not assumed -- see m1_esp32_perf.h */
 
     command_t command = ((const command_common_t *)config->cmd)->command;
     const uint8_t response_cnt = command == SYNC ? 8 : 1;

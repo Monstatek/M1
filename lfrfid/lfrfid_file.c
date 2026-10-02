@@ -13,9 +13,11 @@
 #include "main.h"
 #include "m1_sdcard.h"
 #include "m1_sdcard_man.h"
+#include "m1_sdcard_provision.h"
 #include "m1_file_browser.h"
 #include "m1_file_util.h"
 #include "m1_virtual_kb.h"
+#include "m1_save_filename.h"
 #include "lfrfid.h"
 #include "uiView.h"
 #include "res_string.h"
@@ -24,7 +26,7 @@
 
 /*************************** D E F I N E S ************************************/
 
-#define DRIVE0_RFID     "0:/RFID"
+#define DRIVE0_RFID     M1_SD_DIR_RFID
 #define RFID_FILE_EXTENSION_TMP				"rfid" // rfh for NFC
 //#define RFID_DATAFILE_PACKET_FORMAT_N		3
 //#define RFID_DATAFILE_FILETYPE_PACKET		"PACKET"
@@ -37,6 +39,12 @@
 #define RFID_DATAFILE_VERSION_KEYWORD	"Version"
 #define RFID_DATAFILE_PACKTYPE_KEYWORD	"Packettype"
 #define RFID_DATAFILE_DATA_KEYWORD		"HData"
+
+/* Compatible LF RFID key file (read-only interoperability). */
+#define RFID_INTEROP_FILETYPE			"Flipper RFID key"
+#define RFID_INTEROP_VERSION			"1"
+#define RFID_INTEROP_KEYTYPE_KEYWORD	"Key type"
+#define RFID_INTEROP_DATA_KEYWORD		"Data"
 
 //************************** C O N S T A N T **********************************/
 
@@ -81,46 +89,156 @@ static inline void uid_to_string(char *dst, size_t dst_size,
   * @retval
   */
 /*============================================================================*/
+/*============================================================================*/
+/**
+  * @brief Validate a space-separated hex-byte string WITHOUT relying on the
+  *        shared hex parser. Requires EXACTLY `expected` tokens, each exactly
+  *        two hex digits (rejects invalid chars, odd/short/long tokens, and
+  *        too few / too many bytes). Writes into out[] (size >= expected) but
+  *        the result must be ignored unless this returns true.
+  * @retval true only when the whole string validates exactly.
+  */
+/*============================================================================*/
+static bool rfid_parse_exact_hex_bytes(const char *s, uint8_t *out, int expected)
+{
+	int count = 0;
+
+	if(s == NULL || out == NULL || expected <= 0)
+		return false;
+
+	while(*s)
+	{
+		while(*s == ' ') s++;			/* skip separators */
+		if(*s == '\0') break;
+
+		int ndig = 0;
+		unsigned int byte = 0;
+		while(*s && *s != ' ')
+		{
+			char c = *s++;
+			int d;
+			if(c >= '0' && c <= '9') d = c - '0';
+			else if(c >= 'a' && c <= 'f') d = c - 'a' + 10;
+			else if(c >= 'A' && c <= 'F') d = c - 'A' + 10;
+			else return false;			/* non-hex character */
+			byte = (byte << 4) | (unsigned)d;
+			if(++ndig > 2) return false;		/* token longer than one byte */
+		}
+		if(ndig != 2) return false;		/* odd / short digit count */
+		if(count >= expected) return false;	/* too many bytes */
+		out[count++] = (uint8_t)byte;
+	}
+
+	return (count == expected);			/* too few -> reject */
+}
+
+
+/* Supported saved-key formats share the same "Key: Value" line syntax,
+ * protocol names and data layout. Loading is dual-format; saving remains M1. */
+typedef struct {
+	const char *filetype;    /* expected Filetype value      */
+	const char *version;     /* expected Version value       */
+	const char *proto_key;   /* protocol-name field name     */
+	const char *data_key;    /* credential-data field name   */
+} rfid_file_fmt_t;
+
+static const rfid_file_fmt_t rfid_file_formats[] = {
+	{ RFID_DATAFILE_FILETYPE, RFID_DATAFILE_VERSION,
+	  RFID_DATAFILE_PACKTYPE_KEYWORD, RFID_DATAFILE_DATA_KEYWORD },   /* M1 */
+	{ RFID_INTEROP_FILETYPE,  RFID_INTEROP_VERSION,
+	  RFID_INTEROP_KEYTYPE_KEYWORD,   RFID_INTEROP_DATA_KEYWORD  },
+};
+#define RFID_FILE_FORMAT_COUNT (sizeof(rfid_file_formats)/sizeof(rfid_file_formats[0]))
+
+
 bool lfrfid_profile_load(const S_M1_file_info *f, const char* ext)
 {
 	char file_path[64];
 	char buf[200];
-
 	ParsedValue data;
+	uint8_t protocol;
+	uint16_t expected;
+	uint8_t parsed[sizeof(lfrfid_tag_info.uid)];
+	const rfid_file_fmt_t *fmt = NULL;
+	ProfileSession sess;
+	bool ok = false;
 
-	if(IsValidFileSpec(f, ext))
+	if(!IsValidFileSpec(f, ext))
+		return false;
+
+	fu_path_combine(file_path, sizeof(file_path), f->dir_name, f->file_name);
+
+	/* Single open for all 4 header lookups below (previously 4 independent
+	 * f_open/f_close cycles per selected file). */
+	if(!profile_session_open(&sess, file_path))
+		return false;
+
+	data.buf = buf;
+	data.max_len = sizeof(buf);
+
+	/* Select exactly one format from the Filetype value (both formats share
+	 * the "Filetype"/"Version" header keys). Unknown Filetype -> reject. */
+	if(GetPrivateProfileStringS(&data, RFID_DATAFILE_FILETYPE_KEYWORD, &sess) != 1)
+		goto done;
+
+	for(size_t i = 0; i < RFID_FILE_FORMAT_COUNT; i++)
 	{
-		fu_path_combine(file_path, sizeof(file_path), f->dir_name, f->file_name);
-
-		data.buf = buf;
-		data.max_len = sizeof(buf);
-
-		if(!isValidHeaderField(&data, RFID_DATAFILE_FILETYPE, RFID_DATAFILE_VERSION, file_path))
-			return false;
-
-		GetPrivateProfileString(&data,RFID_DATAFILE_PACKTYPE_KEYWORD, file_path);
-		lfrfid_tag_info.protocol = lfrfid_get_protocol_by_name(data.buf);
-
-		if(lfrfid_tag_info.protocol == (uint8_t)PROTOCOL_NO)
-			return false;
-
-		GetPrivateProfileHex(&data,RFID_DATAFILE_DATA_KEYWORD, file_path);
-
-		memcpy(lfrfid_tag_info.uid, data.buf, data.v.hex.out_len);
-
-		if(lfrfid_tag_info.protocol == 0)
-			lfrfid_tag_info.bitrate = 64;
-		else if(lfrfid_tag_info.protocol == 1)
-			lfrfid_tag_info.bitrate = 32;
-		else if(lfrfid_tag_info.protocol == 2)
-			lfrfid_tag_info.bitrate = 16;
-
-		//fu_get_filename_without_ext(file_path, lfrfid_tag_info.filename, sizeof(lfrfid_tag_info.filename));
-
-		return true;
+		if(strcmp((const char *)data.buf, rfid_file_formats[i].filetype) == 0)
+		{
+			fmt = &rfid_file_formats[i];
+			break;
+		}
 	}
+	if(fmt == NULL)
+		goto done;
 
-	return false;
+	/* Validate this format's exact Version. */
+	if(GetPrivateProfileStringS(&data, RFID_DATAFILE_VERSION_KEYWORD, &sess) != 1)
+		goto done;
+	if(strcmp((const char *)data.buf, fmt->version) != 0)
+		goto done;
+
+	/* Protocol name -> enum, kept in a LOCAL. Read ONLY the selected format's
+	 * field; never fall back to the other format's field name (hybrid files
+	 * are rejected). The global credential state is not touched until every
+	 * field has validated. */
+	if(GetPrivateProfileStringS(&data, fmt->proto_key, &sess) != 1)
+		goto done;
+
+	protocol = (uint8_t)lfrfid_get_protocol_by_name(data.buf);
+	if(protocol == (uint8_t)PROTOCOL_NO)
+		goto done;
+
+	expected = protocol_get_data_size(protocol);
+	if(expected == 0 || expected > sizeof(lfrfid_tag_info.uid))
+		goto done;
+
+	/* Read ONLY the selected format's data field and validate exactly (Phase 1
+	 * hardening): exact token count and exactly two hex digits per byte. A
+	 * missing key makes GetPrivateProfileStringS() return != 1 (buffer may be
+	 * stale), rejected here without dereferencing stale data. */
+	if(GetPrivateProfileStringS(&data, fmt->data_key, &sess) != 1)
+		goto done;
+
+	if(!rfid_parse_exact_hex_bytes((const char *)data.buf, parsed, (int)expected))
+		goto done;
+
+	/* All fields valid: commit to the global credential state. */
+	lfrfid_tag_info.protocol = protocol;
+	memcpy(lfrfid_tag_info.uid, parsed, expected);
+
+	if(protocol == LFRFIDProtocolEM4100)
+		lfrfid_tag_info.bitrate = 64;
+	else if(protocol == LFRFIDProtocolEM4100_32)
+		lfrfid_tag_info.bitrate = 32;
+	else if(protocol == LFRFIDProtocolEM4100_16)
+		lfrfid_tag_info.bitrate = 16;
+
+	ok = true;
+
+done:
+	profile_session_close(&sess);
+	return ok;
 }
 
 
@@ -133,10 +251,12 @@ bool lfrfid_profile_load(const S_M1_file_info *f, const char* ext)
 /*============================================================================*/
 bool lfrfid_profile_save(const char *fp, const PLFRFID_TAG_INFO data)
 {
-    char szString[32];
+    char szString[64];   /* 12-byte spaced hex Data = 35 chars + NUL = 36; 64 for headroom */
 
     int uid_size = protocol_get_data_size(data->protocol);
     const char *protocol = protocol_get_name(data->protocol);
+    if(protocol == NULL)
+        return false; /* unregistered protocol index (e.g. compiled out) -- nothing to save */
     sprintf(szString, "%s", protocol);
 
     /* Filetype */
@@ -172,7 +292,10 @@ bool lfrfid_profile_save(const char *fp, const PLFRFID_TAG_INFO data)
 LFRFIDProtocol lfrfid_get_protocol_by_name(const char* name)
 {
     for(size_t i = 0; i < LFRFIDProtocolMax; i++) {
-        if(strcmp(name, protocol_get_name(i)) == 0) {
+        const char *candidate = protocol_get_name(i);
+        if(candidate == NULL)
+            continue; /* unregistered protocol index (e.g. compiled out) */
+        if(strcmp(name, candidate) == 0) {
             return i;
         }
     }
@@ -193,61 +316,7 @@ LFRFIDProtocol lfrfid_get_protocol_by_name(const char* name)
 // 1: Limited space available on SD card!
 // 2: Error creating directory on SD card!
 // 3: user escapes
-uint8_t lfrfid_save_file_keyboard(char *filepath)
+uint8_t lfrfid_save_file_keyboard(char *filepath, size_t filepath_size)
 {
-	uint8_t fname[50], dname[50];
-	uint8_t ret, error;
-
-	do {
-		error = 0;
-	    m1_sdcard_get_info();
-	    if ( m1_sdcard_get_free_capacity() < 4 ) // 4096 bytes
-	    {
-	    	//M1_LOG_E(M1_LOGDB_TAG, "Limited space available on SD card!");
-	    	error = 1;
-	    	break;
-	    }
-
-	    if(fs_directory_ensure(RFID_FILEPATH) != FR_OK)
-	    {
-	    	error = 2;
-	    	break;
-	    }
-
-	    srand(HAL_GetTick());
-	    while(1)
-	    {
-	    	sprintf((char*)dname, RFID_FILE_PREFIX"%05u", rand() % 0xFFFFF);
-	    	ret = m1_vkb_get_filename((char*)res_string(IDS_ENTER_FILENAME), (char*)dname, (char*)fname);
-	    	if (!ret )
-	    	{
-	    		error = 3; // user escapes
-	    		break;
-	    	}
-	    	strcpy((char*)dname, CONCAT_FILEPATH_FILENAME(DRIVE0_RFID, "/"));
-	    	strcat((char*)dname, (char*)fname);
-	    	strcat((char*)dname, RFID_FILE_EXTENSION);
-
-	    	if(fs_file_exists((char*)dname) == 1)
-	    	{
-	    		m1_message_box(&m1_u8g2, res_string(IDS_DUPLICATE_FILE),NULL," ", res_string(IDS_BACK));
-	    	}
-	    	else
-	    		break;
-
-	    }
-
-	    if ( error==3 ) // user escaped?
-	    	break;
-
-	} while (0);
-
-	if(error == 0)
-	{
-		if(filepath)
-			strcpy(filepath, (char*)dname);
-	}
-
-	return error;
-} // static uint8_t rfid_read_more_options_save(void)
-
+    return m1_save_filename(filepath, filepath_size, RFID_FILEPATH, DRIVE0_RFID "/", RFID_FILE_PREFIX, RFID_FILE_EXTENSION);
+}

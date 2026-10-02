@@ -359,6 +359,14 @@ void lp5814_led_on(uint8_t port, uint8_t value)
 /*============================================================================*/
 void lp5814_led_on_rgb(uint8_t led_rgb, uint8_t value)
 {
+	/* A solid RGB request must also terminate any pattern previously started
+	 * by lp5814_fastblink_on_R_G_B(). Merely disabling the RGB outputs leaves
+	 * the animation engine running; re-enabling a channel then makes a
+	 * nominally solid charge indication blink. The zero-duration command
+	 * disables the engine and preserves the independently controlled white
+	 * backlight before the solid outputs are configured below. */
+	lp5814_fastblink_on_R_G_B(0, 0, 0);
+
 	uint8_t stat = lp5814_readRegister(LP5814_REG_DEV_CONFIG1);
 
 	if ( led_rgb & LED_BLINK_ON_RED )

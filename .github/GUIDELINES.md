@@ -1,5 +1,3 @@
-<!-- See COPYING.txt for license details. -->
-
 GitHub Repository Guidelines
 1. Branch Management
 Main/Master branch is protected and requires pull request reviews

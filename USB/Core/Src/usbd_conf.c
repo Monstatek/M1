@@ -17,6 +17,8 @@
   *
   ******************************************************************************
   */
+#pragma GCC push_options
+#pragma GCC optimize("O0")
 
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
@@ -95,9 +97,9 @@ void HAL_PCD_SuspendCallback(PCD_HandleTypeDef *hpcd)
   */
 void HAL_PCD_ResumeCallback(PCD_HandleTypeDef *hpcd)
 {
-#if M1_USB_MODE == M1_CFG_USB_CDC_MSC
+#if M1_USB_CONFIG == M1_CFG_USB_CDC_MSC
   m1_USB_CDC_ready = 0;
-#elif M1_USB_MODE == M1_CFG_USB_CDC
+#elif M1_USB_CONFIG == M1_CFG_USB_CDC
   m1_USB_CDC_ready = 0;
 #endif
 }
@@ -107,12 +109,59 @@ void HAL_PCD_ResumeCallback(PCD_HandleTypeDef *hpcd)
   * @param  pdev: Device handle
   * @retval USBD Status
   */
+
+#if 1
+USBD_StatusTypeDef USBD_LL_Init(USBD_HandleTypeDef *pdev)
+{
+  pdev->pData = &hpcd_USB_DRD_FS;
+
+  /* H5 시리즈 USB_DRD는 EP당 64바이트 할당 시 0x40(64)씩 증가합니다.
+     EP0 OUT과 EP0 IN은 하드웨어적으로 할당 방식이 특수하므로 아래 주소값이 안전합니다. */
+
+#if M1_USB_CONFIG == M1_CFG_USB_CDC_MSC
+  // --- CDC + MSC Composite Mode ---
+  // EP0 설정 (H5 드라이버 가이드에 따른 기본 배치)
+  HAL_PCDEx_PMAConfig((PCD_HandleTypeDef*)pdev->pData, 0x00, PCD_SNG_BUF, 0x40);  // EP0 OUT
+  HAL_PCDEx_PMAConfig((PCD_HandleTypeDef*)pdev->pData, 0x80, PCD_SNG_BUF, 0x80);  // EP0 IN
+
+  // MSC Endpoints (오프셋 0xC0부터 시작)
+  HAL_PCDEx_PMAConfig((PCD_HandleTypeDef*)pdev->pData, MSC_IN_EP,  PCD_SNG_BUF, 0xC0);
+  HAL_PCDEx_PMAConfig((PCD_HandleTypeDef*)pdev->pData, MSC_OUT_EP, PCD_SNG_BUF, 0x100);
+
+  // CDC Endpoints (오프셋 0x140부터 시작)
+  HAL_PCDEx_PMAConfig((PCD_HandleTypeDef*)pdev->pData, CDC_IN_EP,  PCD_SNG_BUF, 0x140);
+  HAL_PCDEx_PMAConfig((PCD_HandleTypeDef*)pdev->pData, CDC_OUT_EP, PCD_SNG_BUF, 0x180);
+  HAL_PCDEx_PMAConfig((PCD_HandleTypeDef*)pdev->pData, CDC_CMD_EP, PCD_SNG_BUF, 0x1C0); // 커맨드 EP 주소 확보
+
+#elif M1_USB_CONFIG == M1_CFG_USB_MSC
+  // --- MSC Only Mode ---
+  HAL_PCDEx_PMAConfig((PCD_HandleTypeDef*)pdev->pData, 0x00, PCD_SNG_BUF, 0x40);
+  HAL_PCDEx_PMAConfig((PCD_HandleTypeDef*)pdev->pData, 0x80, PCD_SNG_BUF, 0x80);
+
+  HAL_PCDEx_PMAConfig((PCD_HandleTypeDef*)pdev->pData, MSC_IN_EP,  PCD_SNG_BUF, 0xC0);
+  HAL_PCDEx_PMAConfig((PCD_HandleTypeDef*)pdev->pData, MSC_OUT_EP, PCD_SNG_BUF, 0x100);
+
+#elif M1_USB_CONFIG == M1_CFG_USB_CDC
+  // --- CDC Only Mode ---
+  // EP0 (Control)
+  HAL_PCDEx_PMAConfig((PCD_HandleTypeDef*)pdev->pData, 0x00, PCD_SNG_BUF, 0x40);
+  HAL_PCDEx_PMAConfig((PCD_HandleTypeDef*)pdev->pData, 0x80, PCD_SNG_BUF, 0x80);
+  // CDC Data (Bulk)
+  HAL_PCDEx_PMAConfig((PCD_HandleTypeDef*)pdev->pData, CDC_IN_EP,  PCD_SNG_BUF, 0xC0);
+  HAL_PCDEx_PMAConfig((PCD_HandleTypeDef*)pdev->pData, CDC_OUT_EP, PCD_SNG_BUF, 0x100);
+  // CDC Command (Interrupt) - RTS/DTR
+  HAL_PCDEx_PMAConfig((PCD_HandleTypeDef*)pdev->pData, CDC_CMD_EP, PCD_SNG_BUF, 0x140);
+#endif
+
+  return USBD_OK;
+}
+#else
 USBD_StatusTypeDef USBD_LL_Init(USBD_HandleTypeDef *pdev)
 {
   pdev->pData = &hpcd_USB_DRD_FS;
   uint16_t pma_address = 0x40;  // PMA Address start : 0x40
 
-#if M1_USB_MODE == M1_CFG_USB_CDC_MSC
+#if M1_USB_CONFIG == M1_CFG_USB_CDC_MSC
   // CDC+MSC
   HAL_PCDEx_PMAConfig((PCD_HandleTypeDef*)pdev->pData, 0x00, PCD_SNG_BUF, pma_address);         // EP0 OUT, 0x0
   pma_address += 64;
@@ -132,7 +181,7 @@ USBD_StatusTypeDef USBD_LL_Init(USBD_HandleTypeDef *pdev)
   pma_address += 64;
   HAL_PCDEx_PMAConfig((PCD_HandleTypeDef*)pdev->pData, CDC_CMD_EP, PCD_SNG_BUF, pma_address);   // Interrupt, 0x83
 
-#elif M1_USB_MODE == M1_CFG_USB_MSC
+#elif M1_USB_CONFIG == M1_CFG_USB_MSC
   // MSC Only
 
   /* Control Endpoints */
@@ -145,7 +194,7 @@ USBD_StatusTypeDef USBD_LL_Init(USBD_HandleTypeDef *pdev)
   pma_address += 64;
   HAL_PCDEx_PMAConfig((PCD_HandleTypeDef*)pdev->pData , MSC_OUT_EP, PCD_SNG_BUF, pma_address);  // Bulk OUT, 0x1
 
-#elif M1_USB_MODE == M1_CFG_USB_CDC
+#elif M1_USB_CONFIG == M1_CFG_USB_CDC
   // CDC Only
 
   /* Control Endpoints */
@@ -160,6 +209,7 @@ USBD_StatusTypeDef USBD_LL_Init(USBD_HandleTypeDef *pdev)
 
   return USBD_OK;
 }
+#endif
 
 /**
   * @brief  De-Initializes the Low Level portion of the Device driver.
@@ -359,20 +409,45 @@ USBD_StatusTypeDef USBD_LL_SetTestMode(USBD_HandleTypeDef *pdev, uint8_t testmod
 #endif /* USBD_HS_TESTMODE_ENABLE */
 
 /**
-  * @brief  Static single allocation.
-  * @param  size: Size of allocated memory
-  * @retval None
+  * @brief  Bump allocator for USB class handles.
+  *
+  *  Root-cause of HardFault in CDC+MSC composite mode:
+  *  The original implementation always returned the SAME single address
+  *  regardless of 'size'.  In composite mode two class instances call
+  *  USBD_malloc:
+  *    1. USBD_MSC_Init  requests sizeof(USBD_MSC_HandleTypeDef) ≈ 8252 bytes
+  *       (because bot_data[MSC_MEDIA_PACKET=8192] is embedded in the struct)
+  *    2. USBD_CDC_Init  requests sizeof(USBD_CDC_HandleTypeDef) ≈  560 bytes
+  *  Both received the same pointer to a 560-byte buffer.  When MSC wrote into
+  *  bot_data[] it overflowed 7700+ bytes past the buffer end, corrupting
+  *  adjacent static variables and causing a HardFault.
+  *
+  *  Fix: use a bump allocator backed by a pool large enough for one MSC handle
+  *  plus one CDC handle.  Each call returns a distinct, 4-byte-aligned region.
+  *
+  * @param  size: Requested allocation size in bytes
+  * @retval Pointer to allocated region, or NULL if pool is exhausted
   */
 void *USBD_static_malloc(uint32_t size)
 {
-      UNUSED(size);
-      static uint32_t mem[(sizeof(USBD_CDC_HandleTypeDef) / 4) + 1]; /* On 32-bit boundary */
-      return mem;
+  static uint8_t pool[sizeof(USBD_MSC_BOT_HandleTypeDef) + sizeof(USBD_CDC_HandleTypeDef) + 8U];
+  static uint32_t offset = 0U;
+  uint32_t aligned_size = (size + 3U) & ~3U;  /* round up to 4-byte boundary */
+  void *p;
+
+  if ((offset + aligned_size) > (uint32_t)sizeof(pool))
+  {
+    return NULL; /* pool exhausted – indicates a configuration error */
+  }
+  p = &pool[offset];
+  offset += aligned_size;
+  return p;
 }
 
-/**
-  * @brief  Dummy memory free
-  * @param  p: Pointer to allocated  memory address
+/*
+  * @brief  Dummy memory free (pool is never reclaimed; allocations are
+  *         permanent for the lifetime of the USB device).
+  * @param  p: Pointer to previously allocated memory (unused)
   * @retval None
   */
 void USBD_static_free(void *p)
@@ -413,4 +488,6 @@ USBD_StatusTypeDef USBD_Get_USB_Status(HAL_StatusTypeDef hal_status)
       }
       return usb_status;
 }
+
+#pragma GCC push_options
 

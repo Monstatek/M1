@@ -26,7 +26,7 @@
 #include "m1_system.h"
 #include "m1_infrared.h"
 #include "m1_rfid.h"
-#include "lfrfid.h"	//+2025_1031_01_Thomas
+#include "lfrfid.h"
 #include "m1_usb_cdc_msc.h"
 /* USER CODE END Includes */
 

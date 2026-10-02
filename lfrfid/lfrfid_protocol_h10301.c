@@ -3,12 +3,6 @@
 /*
  * LF RFID (125 kHz) implementation
  *
- * Portions of the data structure definitions and table-driven
- * architecture were adapted from the Flipper Zero firmware project.
- *
- * Original project:
- * https://github.com/flipperdevices/flipperzero-firmware
- *
  * Licensed under the GNU General Public License v3.0 (GPLv3).
  *
  * The functional implementation and modifications were
@@ -35,7 +29,7 @@
 #include "app_freertos.h"
 #include "cmsis_os.h"
 #include "main.h"
-#include "uiView.h"
+#include "uiview.h"
 
 #include "lfrfid.h"
 
@@ -57,12 +51,20 @@ static bool protocol_h10301_decoder_execute(void* proto, uint16_t size);
 #define PERIOD_TOL_PCT    20U   // ±20%
 #define HALF_TOL_PCT      70U   // ±30% (half sanity)
 
-#define EMUL_HALF_ONE_CORR	(0)
-#define EMUL_HALF_ZERO_CORR	(0)
-#define EMUL_HALF_ONE_US  (40 - EMUL_HALF_ONE_CORR)
-#define EMUL_HALF_ZERO_US (32 - EMUL_HALF_ZERO_CORR)
-#define EMUL_PERIOD_ONE_US  (80-2) //(80)
-#define EMUL_PERIOD_ZERO_US (64-2) //(64)
+/* True nominal FSK2a half/period values (fc/10, fc/8 at a 125 kHz field).
+ * The "-2" that used to sit here compensated for the old per-edge ISR path
+ * writing TIM5->ARR = time_us with no inclusive-counter "-1" correction
+ * (rfid_emul_handler(), lfrfid_hal.c, now removed) -- it was never an
+ * interrupt-latency fudge factor; the arithmetic cancels exactly:
+ * (32+1)+(30+1)=64, (40+1)+(38+1)=80 (see lfrfid_dma_tx.c's own header
+ * comment for the full derivation). The new GPDMA2-driven transport
+ * (lfrfid_dma_tx.c) performs that inclusive-counter correction itself,
+ * once, from the real measured TIM5 kernel clock -- so it must not be
+ * duplicated here. */
+#define EMUL_HALF_ONE_US  (40)
+#define EMUL_HALF_ZERO_US (32)
+#define EMUL_PERIOD_ONE_US  (80)
+#define EMUL_PERIOD_ZERO_US (64)
 
 /* ───────── FSK half → symbol  ───────── */
 #define HALF_TOLERANCE_RATIO (1.0f - 0.35f)	// 30%

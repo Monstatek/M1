@@ -44,7 +44,7 @@ void m1_logdb_printf(S_M1_LogDebugLevel_t, const char* tag, const char* format, 
 #define M1_LOGDB_DMA_TX_LEN       64
 
 extern UART_HandleTypeDef huart_logdb;
-extern DMA_HandleTypeDef hdma_logdb;
+extern DMA_HandleTypeDef hdma_txlogdb;
 extern DMA_HandleTypeDef hdma_rxlogdb;
 extern uint8_t logdb_rx_buffer[];
 extern uint8_t logdb_tx_buffer[];
