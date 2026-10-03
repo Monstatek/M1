@@ -879,7 +879,41 @@ static void subghz_tx_safe_stop(void)
  * Receive/record/saved-signal inspection are unaffected. */
 static void subghz_tx_region_blocked_msg(void)
 {
-	m1_message_box(&m1_u8g2, "TX Restricted", "Not available", "in this region", "BACK to return");
+	/* Custom-drawn regional TX-refusal notice: bold title + divider rule, two
+	 * centered message lines, and a filled "BACK to return" button. Draw-only;
+	 * the BACK-key dismiss reuses the shared m1_wait_back_to_exit() wait loop,
+	 * matching m1_message_box() semantics. No RF/timing/protocol path touched. */
+	u8g2_uint_t w, x;
+
+	u8g2_ClearBuffer(&m1_u8g2);
+	u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_TXT);
+
+	/* Title (bold), centered */
+	u8g2_SetFont(&m1_u8g2, u8g2_font_helvB08_tf);
+	w = u8g2_GetUTF8Width(&m1_u8g2, "TX Restricted");
+	u8g2_DrawStr(&m1_u8g2, (128 - w) / 2, 11, "TX Restricted");
+
+	/* Divider rule under the title */
+	u8g2_DrawHLine(&m1_u8g2, 6, 15, 116);
+
+	/* Two message lines, centered */
+	u8g2_SetFont(&m1_u8g2, M1_DISP_FUNC_MENU_FONT_N);
+	w = u8g2_GetUTF8Width(&m1_u8g2, "Not available");
+	u8g2_DrawStr(&m1_u8g2, (128 - w) / 2, 31, "Not available");
+	w = u8g2_GetUTF8Width(&m1_u8g2, "in this region");
+	u8g2_DrawStr(&m1_u8g2, (128 - w) / 2, 42, "in this region");
+
+	/* Filled "BACK to return" button, centered */
+	w = u8g2_GetUTF8Width(&m1_u8g2, "BACK to return");
+	x = (128 - (w + 8)) / 2;
+	u8g2_DrawRBox(&m1_u8g2, x, 50, w + 8, 13, 2);
+	u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_BG);
+	u8g2_DrawStr(&m1_u8g2, x + 4, 60, "BACK to return");
+	u8g2_SetDrawColor(&m1_u8g2, M1_DISP_DRAW_COLOR_TXT);
+
+	m1_u8g2_nextpage();
+
+	m1_wait_back_to_exit();
 } // static void subghz_tx_region_blocked_msg(void)
 
 /* Start ONE byte-exact RF transmission of the loaded RAW recording from the

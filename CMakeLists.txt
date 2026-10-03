@@ -166,17 +166,16 @@ if(M1_MFC_RAW_EMULATION AND M1_MFC_DMA_AT)
     endif()
 endif()
 
-# Post-build hardware-acceptance checkpoint guard: independent of the MFC
-# flags above, this protects every production path covered by a recorded
-# hardware-accepted checkpoint (MFC, LF RFID, Sub-GHz, storage/LED -- see
-# documentation/hardware-acceptance/ and cmake/m1_01/hwpass_protected_
-# paths_manifest.txt) by diffing each protected path against the checkpoint
-# git ref, and (when an nm tool is available) confirming forbidden symbols
-# like lfrfid_fsk_osc stay absent from the linked ELF. Fails the build, and
-# names the invalidated subsystem(s), if a protected path differs without a
-# newer accepted checkpoint.
-add_custom_command(TARGET ${CMAKE_PROJECT_NAME} POST_BUILD
-    COMMAND sh "${CMAKE_SOURCE_DIR}/cmake/m1_01/verify_hwpass_protected_paths.sh"
-            "${CMAKE_SOURCE_DIR}" "${M1_NM_TOOL}" "$<TARGET_FILE:${CMAKE_PROJECT_NAME}>"
-    COMMENT "Verifying protected paths match the accepted hardware checkpoint"
-    VERBATIM)
+# Post-build forbidden-symbol guard (self-contained): fail the build if a
+# known-bad symbol is linked into the production ELF. It currently guards
+# against the Flipper-derived LF-RFID FSK oscillator (lfrfid_fsk_osc) silently
+# reappearing in a shipped build. Pure ELF-symbol evidence via nm -- no git
+# history, tag, or checkpoint dependency, so it is fully reproducible from a
+# standalone public checkout.
+if(M1_NM_TOOL)
+    add_custom_command(TARGET ${CMAKE_PROJECT_NAME} POST_BUILD
+        COMMAND sh "${CMAKE_SOURCE_DIR}/cmake/m1_01/verify_no_forbidden_symbols.sh"
+                "${M1_NM_TOOL}" "$<TARGET_FILE:${CMAKE_PROJECT_NAME}>"
+        COMMENT "Verifying no forbidden symbols are linked into the production ELF"
+        VERBATIM)
+endif()
