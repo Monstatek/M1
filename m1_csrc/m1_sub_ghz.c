@@ -235,7 +235,7 @@ static const SubGhz_RecFreq_t subghz_rec_freqs[] =
 	{ 925000000UL, "925.000" },
 };
 #define SUBGHZ_REC_FREQ_COUNT      (sizeof(subghz_rec_freqs)/sizeof(subghz_rec_freqs[0]))
-#define SUBGHZ_REC_FREQ_DEFAULT    14   /* default selection = 434.059 (preserved) */
+#define SUBGHZ_REC_FREQ_DEFAULT    13   /* default selection = 433.920 (preserved) */
 
 static const float subghz_fcc_ism_bands_NA[SUBGHZ_ISM_BANDS_LIST_NA][2] =
 {
