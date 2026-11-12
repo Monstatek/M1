@@ -51,7 +51,7 @@
 #include "st25r3916_com.h"
 #include "rfal_utils.h"
 
-#include "rfal_AnalogConfig.h"
+#include "rfal_analogConfig.h"
 #include "rfal_rf.h"
 #include "rfal_crc.h"        /* rfalCrcCalculateCcitt (CRC_A) for MIFARE Classic */
 #include "crypto1.h"         /* MIFARE Classic Crypto1 cipher (Phase A) */

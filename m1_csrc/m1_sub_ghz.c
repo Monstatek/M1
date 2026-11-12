@@ -97,9 +97,9 @@
 #define SUB_GHZ_RAW_DATA_PARSER_COMPLETE	0x0C
 
 
-#define SUBGHZ_ISM_BANDS_LIST_NA			3
-#define SUBGHZ_ISM_BANDS_LIST_EU			3
-#define SUBGHZ_ISM_BANDS_LIST_ASIA			2
+#define SUBGHZ_ISM_BANDS_LIST_NA			4
+#define SUBGHZ_ISM_BANDS_LIST_EU			4
+#define SUBGHZ_ISM_BANDS_LIST_ASIA			4
 
 #define	SUBGHZ_FCC_BASE_FREQ_300_000			(float)300.00001
 #define	SUBGHZ_FCC_BASE_FREQ_310_000			(float)310.00001
@@ -220,6 +220,9 @@ static const SubGhz_RecFreq_t subghz_rec_freqs[] =
 	{ 318000000UL, "318.000" },
 	{ 390000000UL, "390.000" },
 	{ 418000000UL, "418.000" },
+	{ 430000000UL, "430.000" },
+	{ 430500000UL, "430.500" },
+	{ 431500000UL, "431.500" },
 	{ 433070000UL, "433.070" },
 	{ 433420000UL, "433.420" },
 	{ 433920000UL, "433.920" },
@@ -232,12 +235,12 @@ static const SubGhz_RecFreq_t subghz_rec_freqs[] =
 	{ 925000000UL, "925.000" },
 };
 #define SUBGHZ_REC_FREQ_COUNT      (sizeof(subghz_rec_freqs)/sizeof(subghz_rec_freqs[0]))
-#define SUBGHZ_REC_FREQ_DEFAULT    11   /* default selection = 434.059 (preserved) */
+#define SUBGHZ_REC_FREQ_DEFAULT    13   /* default selection = 433.920 (preserved) */
 
 static const float subghz_fcc_ism_bands_NA[SUBGHZ_ISM_BANDS_LIST_NA][2] =
 {
 	{SUBGHZ_FCC_ISM_BAND_310_000, SUBGHZ_FCC_ISM_BAND_321_950}, 	// 310.00MHz - 321.95MHz
-	/*{SUBGHZ_FCC_ISM_BAND_344_000, SUBGHZ_FCC_ISM_BAND_392_000},		// 344.00MHz - 392.00MHz*/
+	{SUBGHZ_FCC_ISM_BAND_344_000, SUBGHZ_FCC_ISM_BAND_392_000},		// 344.00MHz - 392.00MHz
 	{SUBGHZ_FCC_ISM_BAND_433_050, SUBGHZ_FCC_ISM_BAND_434_790}, 	// 433.05MHz - 434.79MHz
 	{SUBGHZ_FCC_ISM_BAND_915_000, SUBGHZ_FCC_ISM_BAND_928_000}		// 915.00MHz - 928.00MHz
 };
@@ -245,7 +248,7 @@ static const float subghz_fcc_ism_bands_NA[SUBGHZ_ISM_BANDS_LIST_NA][2] =
 static const float subghz_fcc_ism_bands_EU[SUBGHZ_ISM_BANDS_LIST_EU][2] =
 {
 	{SUBGHZ_FCC_ISM_BAND_310_000, SUBGHZ_FCC_ISM_BAND_321_950}, 	// 310.00MHz - 321.95MHz
-	/*{SUBGHZ_FCC_ISM_BAND_344_000, SUBGHZ_FCC_ISM_BAND_392_000},		// 344.00MHz - 392.00MHz*/
+	{SUBGHZ_FCC_ISM_BAND_344_000, SUBGHZ_FCC_ISM_BAND_392_000},		// 344.00MHz - 392.00MHz
 	{SUBGHZ_FCC_ISM_BAND_433_050, SUBGHZ_FCC_ISM_BAND_434_790}, 	// 433.05MHz - 434.79MHz
 	{SUBGHZ_FCC_ISM_BAND_915_000, SUBGHZ_FCC_ISM_BAND_928_000}		// 915.00MHz - 928.00MHz
 };
@@ -253,8 +256,8 @@ static const float subghz_fcc_ism_bands_EU[SUBGHZ_ISM_BANDS_LIST_EU][2] =
 static const float subghz_fcc_ism_bands_ASIA[SUBGHZ_ISM_BANDS_LIST_ASIA][2] =
 {
 	{SUBGHZ_FCC_ISM_BAND_310_000, SUBGHZ_FCC_ISM_BAND_321_950}, 	// 310.00MHz - 321.95MHz
-	/*{SUBGHZ_FCC_ISM_BAND_344_000, SUBGHZ_FCC_ISM_BAND_392_000},		// 344.00MHz - 392.00MHz*/
-	/*{SUBGHZ_FCC_ISM_BAND_433_050, SUBGHZ_FCC_ISM_BAND_434_790}, 	// 433.05MHz - 434.79MHz*/
+	{SUBGHZ_FCC_ISM_BAND_344_000, SUBGHZ_FCC_ISM_BAND_392_000},		// 344.00MHz - 392.00MHz
+	{SUBGHZ_FCC_ISM_BAND_433_050, SUBGHZ_FCC_ISM_BAND_434_790}, 	// 433.05MHz - 434.79MHz
 	{SUBGHZ_FCC_ISM_BAND_915_000, SUBGHZ_FCC_ISM_BAND_928_000}		// 915.00MHz - 928.00MHz
 };
 
@@ -765,10 +768,10 @@ static uint8_t sub_ghz_fcc_ism_band_check_hz(uint32_t hz)
 	 * regional configuration. */
 	if ( m1_device_stat.config.ism_band_region >= SUBGHZ_ISM_BAND_REGIONS_LIST )
 	{
-		return 1; /* not allowed */
+		return 0; /* not allowed */
 	}
 
-	ret = 1;
+	ret = 0;
 	freq = (float)hz / 1000000.0f; // MHz
 	for (i=0; i<subghz_regions_list[m1_device_stat.config.ism_band_region].bands_list; i++)
 	{
